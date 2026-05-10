@@ -55,8 +55,12 @@ class KeywordSelectorAgent(BaseAgent):
                 """
                 select id, keyword, intent, priority_score
                   from keywords
-                 where site_id = %s and status = 'planned'
-                 order by priority_score desc nulls last
+                 where site_id = %s
+                   and status = 'planned'
+                   and (last_used_at is null
+                        or last_used_at < now() - interval '6 hours')
+                 order by last_used_at nulls first,
+                          priority_score desc nulls last
                  limit %s
                 """,
                 (str(site_id), cap),

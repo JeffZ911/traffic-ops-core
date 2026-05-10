@@ -96,7 +96,12 @@ def _link_article_keyword(article_id: UUID, keyword_id: UUID) -> None:
 # ----------------------------------------------------------------- run
 
 
-def run_one_article(site_id: UUID, *, log=print) -> dict[str, Any]:
+def run_one_article(
+    site_id: UUID,
+    *,
+    log=print,
+    max_retry_rounds_override: Optional[int] = None,
+) -> dict[str, Any]:
     """
     Execute the full pipeline for ONE article. Returns a summary dict.
 
@@ -169,6 +174,8 @@ def run_one_article(site_id: UUID, *, log=print) -> dict[str, Any]:
 
         # -------------------------------------------------- Step 4: write + QA loop
         max_retry_rounds = int(site_config["qa_thresholds"].get("max_retry_rounds", 3))
+        if max_retry_rounds_override is not None:
+            max_retry_rounds = max_retry_rounds_override
         min_words = site_config["content_plan"]["min_word_count"]
         max_words = site_config["content_plan"]["max_word_count"]
 

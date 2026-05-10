@@ -81,9 +81,20 @@ class WritingAgent(BaseAgent):
 
         feedback_block = ""
         if feedback:
+            banned = feedback.get("fabricated_terms") or []
+            ban_section = ""
+            if banned:
+                bullet = "\n".join(f"   - {t}" for t in banned)
+                ban_section = (
+                    "\nBANNED TERMS — these names did NOT verify in search last "
+                    "time. You MUST NOT use any of them in this rewrite. If you "
+                    "need to refer to such a concept, write '[information "
+                    "unavailable]' or omit it entirely:\n" + bullet + "\n"
+                )
             feedback_block = (
                 "PREVIOUS ATTEMPT FAILED QA. Address these issues in this rewrite:\n"
                 f"{json.dumps(feedback, indent=2, ensure_ascii=False)}\n"
+                + ban_section
             )
 
         prompt = PROMPT.format(
