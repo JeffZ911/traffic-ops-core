@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -27,9 +28,22 @@ from src.utils.llm import get_llm_provider
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-SITE_REPO = (
-    Path(__file__).resolve().parent.parent.parent / "ntecodex-site"
-).resolve()
+
+def _site_repo_path() -> Path:
+    """SITE_REPO_PATH env var wins; else try sibling layout (CI nested) then
+    parent-sibling layout (local dev)."""
+    env = os.getenv("SITE_REPO_PATH")
+    if env:
+        return Path(env).resolve()
+    here = Path(__file__).resolve()
+    nested = here.parent.parent / "ntecodex-site"        # CI: traffic-ops-core/ntecodex-site
+    parent_sibling = here.parent.parent.parent / "ntecodex-site"  # local: traffic-ops/ntecodex-site
+    if nested.exists():
+        return nested.resolve()
+    return parent_sibling.resolve()
+
+
+SITE_REPO = _site_repo_path()
 
 
 # article_type → relative content path (mirrors PublishAgent.PATH_BY_TYPE)
@@ -99,6 +113,8 @@ def main() -> int:
                    help="Inline images per article (in addition to hero)")
     p.add_argument("--limit", type=int, default=20,
                    help="Max articles to process")
+    p.add_argument("--new-only", action="store_true",
+                   help="Only consider articles published in the last 48h")
     args = p.parse_args()
 
     if not SITE_REPO.exists():
@@ -113,11 +129,15 @@ def main() -> int:
             return 2
         site_id, config = site_row
 
+        when_clause = (
+            "and published_at > now() - interval '48 hours'"
+            if args.new_only else ""
+        )
         cur.execute(
-            """
+            f"""
             select id, slug, title, article_type, outline
               from articles
-             where site_id = %s and status = 'published'
+             where site_id = %s and status = 'published' {when_clause}
              order by published_at
              limit %s
             """,

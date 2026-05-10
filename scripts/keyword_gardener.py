@@ -1,0 +1,231 @@
+"""Keep the keyword pool topped up so the daily cron never starves.
+
+If `keywords` for the site has fewer than --min-planned rows in status='planned',
+ask Gemini (with Google Search grounding) for fresh long-tail keyword ideas
+balanced across the diversity-required article types. Newly proposed words are
+inserted with status='planned' and source='auto_seed'.
+
+Idempotent: dedupes against existing keywords (case-insensitive).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+from uuid import UUID
+
+from dotenv import load_dotenv
+
+from src.agents._json_extract import extract_json
+from src.db.client import get_db_connection
+from src.utils.llm import get_llm_provider
+
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+
+# Map article types to natural-language hints we feed the LLM
+TYPE_HINTS = {
+    "build":        'character build / "best build for X"',
+    "tier_list":    'tier lists / "best DPS / Support / Healer"',
+    "boss_guide":   'boss-fight strategy / "how to beat X"',
+    "reroll":       'reroll-related guides',
+    "character_db": 'character profile / "X guide"',
+    "weapon_db":    'weapon / artifact / disk profile',
+    "news":         'patch notes / banner schedule / version updates',
+    "faq":          'FAQ / mechanics-explained content',
+    "comparison":   '"X vs Y" head-to-heads',
+}
+
+PROMPT_TEMPLATE = """You are an SEO researcher for a fan-database site about {game_name}
+(abbreviation {game_abbr}, released {release_date}). The site needs fresh
+long-tail keywords every day so the daily content pipeline always has
+something to write about.
+
+We already have these keywords in the pool — DO NOT duplicate them
+(case-insensitive match):
+{existing_sample}
+
+Use Google Search to find current player-search-intent keywords (last 30
+days) for {game_name}. Generate exactly {n_target} NEW keywords distributed
+across these required article types:
+
+{type_section}
+
+Reply ONLY with a single JSON array (no markdown fence, no preamble), each
+element shaped:
+{{
+  "keyword": "<lowercase search query, 3-7 words, includes 'nte' or 'neverness'>",
+  "intent": "informational | comparison | how-to | list",
+  "article_type": "<one of the types above>",
+  "priority_score": <integer 50-90; higher = more search demand>,
+  "notes": "<one short reason / source>"
+}}
+"""
+
+
+def _existing_keywords(cur, site_id: UUID, sample_n: int = 60) -> set[str]:
+    cur.execute(
+        "select lower(keyword) from keywords where site_id = %s",
+        (str(site_id),),
+    )
+    return {r[0] for r in cur.fetchall()}
+
+
+def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("--min-planned", type=int, default=20,
+                   help="Top up only when planned count drops below this")
+    p.add_argument("--target", type=int, default=15,
+                   help="How many new keywords to add when topping up")
+    p.add_argument("--budget-usd", type=float, default=0.50)
+    p.add_argument("--force", action="store_true",
+                   help="Top up even if already above threshold")
+    args = p.parse_args()
+
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select id, config from sites where domain = 'ntecodex.com' limit 1"
+        )
+        row = cur.fetchone()
+        if not row:
+            print("❌ ntecodex.com site missing")
+            return 2
+        site_id, config = row
+
+        cur.execute(
+            "select count(*) from keywords where site_id = %s and status = 'planned'",
+            (str(site_id),),
+        )
+        planned_count = cur.fetchone()[0]
+        existing = _existing_keywords(cur, site_id)
+
+    print(f"🌱 Keyword Gardener")
+    print(f"   site:           ntecodex.com")
+    print(f"   planned now:    {planned_count}")
+    print(f"   threshold:      {args.min_planned}")
+    print(f"   total in pool:  {len(existing)}")
+    if planned_count >= args.min_planned and not args.force:
+        print(f"   ✓ above threshold — no action")
+        return 0
+
+    print(f"   → topping up by {args.target}")
+
+    game = config.get("game", {})
+    diversity = (config.get("content_plan") or {}).get("diversity", {})
+    required_types = diversity.get("required_types") or list(TYPE_HINTS.keys())
+
+    type_section = "\n".join(
+        f"  - {t}: {TYPE_HINTS.get(t, 'general guide')}"
+        for t in required_types
+    )
+
+    # Sample some existing keywords to feed the prompt (so model knows what to avoid)
+    existing_sample = sorted(existing)
+    if len(existing_sample) > 60:
+        # Show first 30 + last 30 (keeps prompt small)
+        existing_sample = existing_sample[:30] + existing_sample[-30:]
+    existing_lines = "\n".join(f"  - {kw}" for kw in existing_sample) or "  (empty pool)"
+
+    prompt = PROMPT_TEMPLATE.format(
+        game_name=game.get("name", "the game"),
+        game_abbr=game.get("abbreviation", ""),
+        release_date=game.get("release_date", "recently"),
+        existing_sample=existing_lines,
+        n_target=args.target,
+        type_section=type_section,
+    )
+
+    provider = get_llm_provider("gemini")
+    text_cfg = config.get("text_provider") or {}
+    model = (
+        text_cfg.get("keyword_research_model")
+        or text_cfg.get("outline_model")
+        or "gemini-3-flash-preview"
+    )
+
+    resp = provider.generate(
+        prompt=prompt, model=model, max_tokens=4000, temperature=0.5,
+        json_mode=True, enable_search=True,
+    )
+
+    if resp.cost_usd > args.budget_usd:
+        print(f"⚠️  this single call cost ${resp.cost_usd:.4f} — over budget cap "
+              f"${args.budget_usd:.2f}. Bailing.")
+        return 1
+
+    # Try direct JSON parse (array), with fallback through extract_json which
+    # handles fenced output but expects an object — wrap arrays into objects.
+    text = resp.text.strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        # extract_json returns a dict; wrap text into an object for parsing
+        try:
+            obj = extract_json("{\"items\": " + text + "}")
+            data = obj.get("items", [])
+        except Exception:
+            print(f"❌ couldn't parse LLM output:\n{text[:500]}")
+            return 1
+
+    if not isinstance(data, list):
+        # Maybe they returned an object with a key
+        if isinstance(data, dict):
+            for k in ("keywords", "items", "results"):
+                if k in data and isinstance(data[k], list):
+                    data = data[k]
+                    break
+        if not isinstance(data, list):
+            print(f"❌ unexpected shape: {type(data).__name__}")
+            return 1
+
+    # De-dupe against existing pool
+    fresh: list[dict[str, Any]] = []
+    skipped = 0
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        kw = (item.get("keyword") or "").strip().lower()
+        if not kw or kw in existing:
+            skipped += 1
+            continue
+        fresh.append(item)
+        existing.add(kw)
+
+    if not fresh:
+        print(f"   nothing to insert (all {skipped} candidates were duplicates / empty)")
+        return 0
+
+    inserted = 0
+    with get_db_connection() as conn, conn.cursor() as cur:
+        for item in fresh:
+            try:
+                cur.execute(
+                    """
+                    insert into keywords
+                      (site_id, keyword, intent, priority_score, source, notes, status)
+                    values (%s, %s, %s, %s, 'auto_seed', %s, 'planned')
+                    on conflict (site_id, keyword) do nothing
+                    """,
+                    (
+                        str(site_id),
+                        item.get("keyword"),
+                        item.get("intent"),
+                        int(item.get("priority_score") or 60),
+                        (item.get("notes") or "")[:500],
+                    ),
+                )
+                inserted += cur.rowcount or 0
+            except Exception as e:
+                print(f"   ⚠️ skip {item.get('keyword')!r}: {e}")
+
+    print(f"   ✅ inserted {inserted} new keyword(s); cost ${resp.cost_usd:.4f}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

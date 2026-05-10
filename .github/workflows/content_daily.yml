@@ -1,0 +1,114 @@
+name: Content Daily Pipeline
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 02:00 UTC = 10:00 Asia/Shanghai
+  workflow_dispatch:
+
+# Cancel an in-flight run if a newer one starts
+concurrency:
+  group: content-daily
+  cancel-in-progress: false
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout traffic-ops-core
+        uses: actions/checkout@v4
+
+      - name: Checkout ntecodex-site (cross-repo)
+        uses: actions/checkout@v4
+        with:
+          repository: JeffZ911/ntecodex-site
+          # SITE_REPO_PAT must have repo:contents:write on ntecodex-site.
+          # The auto-provided GITHUB_TOKEN can only access this repo, so we
+          # need a PAT to push back to the site.
+          token: ${{ secrets.SITE_REPO_PAT }}
+          path: ntecodex-site
+          fetch-depth: 0
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Python deps
+        run: pip install -e .
+
+      - name: Configure git for site repo
+        working-directory: ntecodex-site
+        run: |
+          git config user.name "${{ secrets.GIT_USER_NAME }}"
+          git config user.email "${{ secrets.GIT_USER_EMAIL }}"
+
+      # ---------------------------------------------------------------- 1.
+      - name: Garden the keyword pool
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python -m scripts.keyword_gardener --min-planned 20 --target 12
+
+      # ---------------------------------------------------------------- 2.
+      - name: Generate one article (orchestrator)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python -m scripts.run_one_article_smoke
+
+      # ---------------------------------------------------------------- 3.
+      - name: Publish article markdown to ntecodex-site
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SITE_REPO_PATH: ${{ github.workspace }}/ntecodex-site
+        run: python -m scripts.publish_articles
+
+      # ---------------------------------------------------------------- 4.
+      - name: Generate hero + 2 inline images for the new article
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SITE_REPO_PATH: ${{ github.workspace }}/ntecodex-site
+        run: |
+          pip install --quiet Pillow
+          python -m scripts.run_image_for_articles --new-only --inline 2 --budget-usd 0.50
+
+      # ---------------------------------------------------------------- 5.
+      - name: Push site repo to GitHub (triggers Cloudflare Pages deploy)
+        working-directory: ntecodex-site
+        run: |
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git add .
+            git commit -m "[auto] daily pipeline: $(date -u +%Y-%m-%d)"
+            git push
+          else
+            echo "no changes — pipeline produced no new article today"
+          fi
+
+      # ---------------------------------------------------------------- 6.
+      - name: Notify on failure
+        if: failure()
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+        run: |
+          python -m src.utils.send_alert \
+            --type=pipeline_failure \
+            --workflow=content_daily \
+            --severity=critical \
+            --subject="Content Daily Pipeline failed" \
+            --message="Run ${{ github.run_id }} on ${{ github.repository }} failed.
+          Check logs at ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

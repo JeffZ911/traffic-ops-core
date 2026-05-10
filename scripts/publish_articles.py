@@ -5,6 +5,7 @@ No git push (Phase 1.A scope: write files only, leave staging to operator).
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -17,10 +18,18 @@ from src.utils.llm import get_llm_provider
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-# ntecodex-site lives next to traffic-ops-core under traffic-ops/
-SITE_REPO = (
-    Path(__file__).resolve().parent.parent.parent / "ntecodex-site"
-).resolve()
+
+def _site_repo_path() -> Path:
+    env = os.getenv("SITE_REPO_PATH")
+    if env:
+        return Path(env).resolve()
+    here = Path(__file__).resolve()
+    nested = here.parent.parent / "ntecodex-site"
+    parent_sibling = here.parent.parent.parent / "ntecodex-site"
+    return (nested if nested.exists() else parent_sibling).resolve()
+
+
+SITE_REPO = _site_repo_path()
 
 
 def main() -> int:
