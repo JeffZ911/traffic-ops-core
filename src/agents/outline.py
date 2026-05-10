@@ -2,6 +2,9 @@
 
 Branches per article_type (see CODE-SPEC §3.2.4 + SITE-STRUCTURE §6.3).
 character_db follows the JSON schema in SITE-STRUCTURE §3.3.
+
+Uses Google Search grounding to base the outline on real, current game data
+rather than the LLM's stale training set.
 """
 
 from __future__ import annotations
@@ -9,6 +12,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from src.agents._json_extract import extract_json
 from src.agents.base import BaseAgent
 
 
@@ -25,22 +29,37 @@ TYPE_SECTIONS: dict[str, list[str]] = {
 }
 
 
-GENERIC_PROMPT = """You are an SEO content strategist for a gacha-game guide site
-(Neverness to Everness, abbreviated NTE).
+FACTUAL_RULES = """
+CRITICAL FACTUAL ACCURACY RULES:
+1. This article is about {game_name} ({game_abbr}), released on {release_date}.
+2. You MUST use Google Search to find current, accurate information about
+   characters, weapons, banners, and game mechanics in {game_name}.
+3. DO NOT invent character names, weapon names, or game mechanics. If your
+   search returns no results for a specific fact, write "[information unavailable]"
+   rather than making something up.
+4. Prefer official sources: official game website, official Discord,
+   mainstream gaming news (IGN, GameSpot, Polygon, Game8, Game Rant), Reddit
+   r/{game_subreddit}, prydwen.gg, gamerant.com.
+"""
 
-Generate an outline for a single article.
+
+GENERIC_PROMPT = """You are an SEO content strategist for a guide site about {game_name}.
+
+{factual_rules}
+
+Your task: generate an outline for a single article.
 
 Keyword (target search query): {keyword}
 Article type: {article_type}
 Required sections (use these as H2 headings, in order): {sections}
 Target word count: {target_words}
 
-Reply with JSON only (no markdown fence). Schema:
+Reply with a single JSON object (no surrounding prose, no fences). Schema:
 {{
   "article_type": "{article_type}",
-  "title": "<H1 / SEO title, 50–65 chars>",
+  "title": "<H1 / SEO title, 50-65 chars>",
   "slug": "<kebab-case slug, ASCII only, max 60 chars>",
-  "meta_description": "<140–160 chars>",
+  "meta_description": "<140-160 chars>",
   "h1": "<the article H1>",
   "sections": [
     {{
@@ -61,46 +80,48 @@ Reply with JSON only (no markdown fence). Schema:
 """
 
 
-CHARACTER_DB_PROMPT = """You are an SEO content strategist for a gacha-game guide site
-(Neverness to Everness, abbreviated NTE).
+CHARACTER_DB_PROMPT = """You are an SEO content strategist for a guide site about {game_name}.
 
-Generate a structured character_db page outline for the keyword: {keyword}
+{factual_rules}
+
+Your task: generate a structured character_db page outline for the keyword: {keyword}
 Target word count: {target_words}
 
 The character_db type uses a SPECIFIC JSON schema (do not deviate).
 
-Reply with JSON only (no markdown fence). Schema:
+Reply with a single JSON object (no surrounding prose, no fences). Schema:
 {{
   "article_type": "character_db",
-  "title": "<H1 / SEO title with character name + 'NTE Build & Guide'>",
+  "title": "<H1 / SEO title with character name + game abbreviation>",
   "slug": "<character-name-slug>",
-  "meta_description": "<140–160 chars>",
+  "meta_description": "<140-160 chars>",
   "h1": "<the article H1>",
   "character_id": "<lowercase character name>",
-  "rarity": <int 4-5>,
-  "element": "<element name; if unknown, 'Unknown'>",
+  "rarity": <int 4 or 5; if unknown use null>,
+  "element": "<element name; if unknown 'Unknown'>",
   "weapon_type": "<sword|bow|polearm|catalyst|claymore|fist; if unknown 'Unknown'>",
-  "tier": "<S+|S|A|B|C>",
+  "tier": "<S+|S|A|B|C; if community has not rated yet 'Unrated'>",
   "role": ["DPS"|"Sub-DPS"|"Support"|"Healer"|"Tank"],
   "release_banner": "<banner name or 'Unknown'>",
   "skills": {{
-    "basic_attack": {{"name": "<name>", "description": "<desc>"}},
-    "skill":        {{"name": "<name>", "description": "<desc>", "cooldown_sec": <int>}},
-    "ultimate":     {{"name": "<name>", "description": "<desc>", "energy_cost": <int>}},
-    "passives":     [{{"name": "<name>", "description": "<desc>"}}]
+    "basic_attack": {{"name": "<name or [information unavailable]>", "description": "..."}},
+    "skill":        {{"name": "...", "description": "...", "cooldown_sec": <int or null>}},
+    "ultimate":     {{"name": "...", "description": "...", "energy_cost": <int or null>}},
+    "passives":     [{{"name": "...", "description": "..."}}]
   }},
   "ascension_materials": [
-    {{"level": 20, "items": ["<item>", "..."]}}
+    {{"level": 20, "items": ["<item or [information unavailable]>"]}}
   ],
   "best_build": {{
-    "weapons": ["<weapon name>", "<weapon name>"],
+    "weapons": ["<weapon name>"],
     "disks": [
-      {{"set": "<4pc set name>", "main_stats": {{"head": "...", "chest": "..."}},
+      {{"set": "<4pc set name>",
+        "main_stats": {{"head": "...", "chest": "..."}},
         "sub_priority": ["CritRate", "CritDmg", "ATK%"]}}
     ]
   }},
   "teams": [
-    {{"name": "<team comp name>", "members": ["<char1>", "<char2>", "..."]}}
+    {{"name": "<team comp name>", "members": ["<char1>", "<char2>"]}}
   ],
   "sections": [
     {{"h2": "Overview",   "key_points": ["..."], "data_required": []}},
@@ -110,12 +131,12 @@ Reply with JSON only (no markdown fence). Schema:
     {{"h2": "Teams",      "key_points": ["..."], "data_required": []}}
   ],
   "internal_links": [{{"anchor_text": "<text>", "target_keyword": "<keyword>"}}],
-  "image_specs": [{{"position": "hero", "description": "<desc>", "aspect_ratio": "16:9"}}],
+  "image_specs": [{{"position": "hero", "description": "...", "aspect_ratio": "16:9"}}],
   "estimated_word_count": {target_words}
 }}
 
-For unknown game-specific data (NTE is recently launched), make plausible
-educated guesses but keep them clearly fillable later — flag in notes.
+Always populate fields with real values from search results. For any field
+where search yields no reliable answer, use "[information unavailable]" or null.
 """
 
 
@@ -129,13 +150,26 @@ class OutlineAgent(BaseAgent):
         article_type = input_data["article_type"]
         target_words = int(input_data.get("target_word_count", 1500))
 
+        game = self.site_config.get("game", {})
+        rules = FACTUAL_RULES.format(
+            game_name=game.get("name", "the game"),
+            game_abbr=game.get("abbreviation", ""),
+            release_date=game.get("release_date", "recently"),
+            game_subreddit=game.get("name", "").replace(" ", ""),
+        )
+
         if article_type == "character_db":
-            prompt = CHARACTER_DB_PROMPT.format(keyword=keyword, target_words=target_words)
-        else:
-            sections = TYPE_SECTIONS.get(
-                article_type, ["Overview", "Details", "FAQ"]
+            prompt = CHARACTER_DB_PROMPT.format(
+                game_name=game.get("name", "the game"),
+                factual_rules=rules,
+                keyword=keyword,
+                target_words=target_words,
             )
+        else:
+            sections = TYPE_SECTIONS.get(article_type, ["Overview", "Details", "FAQ"])
             prompt = GENERIC_PROMPT.format(
+                game_name=game.get("name", "the game"),
+                factual_rules=rules,
                 keyword=keyword,
                 article_type=article_type,
                 sections=", ".join(sections),
@@ -143,11 +177,14 @@ class OutlineAgent(BaseAgent):
             )
 
         resp = self._call_llm(
-            prompt=prompt, max_tokens=4000, temperature=0.4, json_mode=True,
+            prompt=prompt,
+            max_tokens=4000,
+            temperature=0.4,
+            json_mode=True,        # auto-dropped because enable_search=True
+            enable_search=True,
         )
-        outline = json.loads(resp.text)
+        outline = extract_json(resp.text)
 
-        # Minimal validation
         for required in ("title", "slug", "h1", "sections"):
             if required not in outline:
                 raise ValueError(f"Outline missing field: {required}")
