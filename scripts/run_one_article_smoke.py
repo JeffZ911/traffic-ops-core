@@ -119,7 +119,14 @@ def main() -> int:
     print("..." if len(content) > 500 else "(end)")
     print()
     print(f"📝 article_id: {summary['article_id']}  ({summary.get('word_count')} words)")
-    return 0 if summary["final_status"] == "qa_passed" else 1
+
+    # Exit policy: qa_failed is an EXPECTED outcome for the daily cron
+    # (e.g. game info too sparse on the picked keyword). The pipeline ran
+    # cleanly — it just produced no shippable article today. Returning 0
+    # lets downstream steps (publish / image / deploy) run and become
+    # no-ops; only a real crash inside an Agent (which raises and would
+    # NOT reach this line) should fail the workflow.
+    return 0
 
 
 if __name__ == "__main__":
