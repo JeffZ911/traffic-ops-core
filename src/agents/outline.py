@@ -178,7 +178,10 @@ class OutlineAgent(BaseAgent):
 
         resp = self._call_llm(
             prompt=prompt,
-            max_tokens=4000,
+            # Bumped: with enable_search the model spends ~thousands of tokens
+            # on thinking before emitting JSON. 4k was hitting truncation on
+            # boss_guide/character_db schemas.
+            max_tokens=8000,
             temperature=0.4,
             json_mode=True,        # auto-dropped because enable_search=True
             enable_search=True,
