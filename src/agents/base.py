@@ -103,6 +103,16 @@ class BaseAgent(ABC):
             "model": self._calls[-1].model,
         }
 
+    def _aggregated_sources(self) -> list[dict]:
+        """Flatten + dedupe grounding sources from every LLM call this run."""
+        seen: dict[str, dict] = {}
+        for c in self._calls:
+            for s in c.grounding_sources:
+                uri = s.get("uri") or ""
+                if uri and uri not in seen:
+                    seen[uri] = s
+        return list(seen.values())
+
     # ---------------------------------------------------- agent_runs I/O
 
     def _insert_started(
@@ -217,7 +227,11 @@ class BaseAgent(ABC):
                     f"{self.name} failed after {attempt + 1} attempts: {err_text}"
                 ) from last_error
 
-            # Success
+            # Success — attach grounding sources to output (if any) so they
+            # land in agent_runs.output for downstream consumers.
+            sources = self._aggregated_sources()
+            if sources and isinstance(output, dict):
+                output = {**output, "_sources": sources}
             metrics = self._aggregated_metrics()
             self._update_finalize(
                 run_id, "success", metrics, output=output, error_msg=None

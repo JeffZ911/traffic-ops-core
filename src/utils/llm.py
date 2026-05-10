@@ -36,6 +36,14 @@ class LLMResponse(BaseModel):
     duration_ms: int
     model: str
     raw: dict = {}
+    # Search grounding (only populated when generate(enable_search=True))
+    search_used: bool = False
+    grounding_sources: list[dict] = []   # [{"uri": str, "title": str}, ...]
+
+
+# Per Gemini pricing 2026-05: dynamic Google Search grounding adds a flat
+# fee per request (≈$0.035). Bumped slightly conservatively.
+SEARCH_GROUNDING_USD_PER_CALL = 0.035
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +81,7 @@ class BaseLLMProvider(ABC):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         json_mode: bool = False,
+        enable_search: bool = False,
         **kwargs: Any,
     ) -> LLMResponse:
         ...
@@ -105,9 +114,16 @@ class GeminiLLMProvider(BaseLLMProvider):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         json_mode: bool = False,
+        enable_search: bool = False,
         **kwargs: Any,
     ) -> LLMResponse:
         from google.genai import types
+
+        # Note: response_mime_type=application/json is incompatible with
+        # google_search tool. When both are requested, drop json_mode and
+        # rely on prompt instructions for JSON shape (the agent code parses).
+        if enable_search and json_mode:
+            json_mode = False
 
         config_kwargs: dict[str, Any] = {
             "max_output_tokens": max_tokens,
@@ -117,6 +133,10 @@ class GeminiLLMProvider(BaseLLMProvider):
             config_kwargs["system_instruction"] = system_prompt
         if json_mode:
             config_kwargs["response_mime_type"] = "application/json"
+        if enable_search:
+            config_kwargs["tools"] = [
+                types.Tool(google_search=types.GoogleSearch())
+            ]
 
         config = types.GenerateContentConfig(**config_kwargs)
 
@@ -140,11 +160,35 @@ class GeminiLLMProvider(BaseLLMProvider):
         try:
             cost = self.estimate_cost(model, tokens_in, tokens_out)
         except LookupError:
-            # Don't fail the call just because pricing row is missing — return 0
-            # but the cost will be visibly wrong, prompting investigation.
             cost = 0.0
+        if enable_search:
+            cost += SEARCH_GROUNDING_USD_PER_CALL
 
-        # Best-effort raw capture (may not be JSON-serialisable in all SDK versions)
+        # Extract grounding metadata if search was used
+        sources: list[dict] = []
+        search_used = False
+        if enable_search:
+            try:
+                cands = getattr(response, "candidates", None) or []
+                for cand in cands:
+                    gm = getattr(cand, "grounding_metadata", None)
+                    if not gm:
+                        continue
+                    chunks = getattr(gm, "grounding_chunks", None) or []
+                    for ch in chunks:
+                        web = getattr(ch, "web", None)
+                        if web is None:
+                            continue
+                        uri = getattr(web, "uri", None)
+                        title = getattr(web, "title", None)
+                        if uri:
+                            sources.append({"uri": uri, "title": title or ""})
+                            search_used = True
+            except Exception:
+                # Don't break the call over metadata-shape changes
+                pass
+
+        # Best-effort raw capture
         raw: dict = {}
         try:
             raw = response.to_json_dict() if hasattr(response, "to_json_dict") else {}
@@ -159,6 +203,8 @@ class GeminiLLMProvider(BaseLLMProvider):
             duration_ms=duration_ms,
             model=model,
             raw=raw,
+            search_used=search_used,
+            grounding_sources=sources,
         )
 
     def estimate_cost(self, model: str, tokens_in: int, tokens_out: int) -> float:
