@@ -5,7 +5,7 @@ so the operator can swap models from the dashboard without code change.
 
 Phase 1.A scope:
   - Generate 1 hero (16:9) + N inline images per call
-  - Save to <site_repo>/public/img/<slug>/hero.png etc.
+  - Save to <site_repo>/public/img/<slug>/hero.webp etc.
   - Update articles.<frontmatter or DB> separately (caller's job)
   - Insert one row per image into the `images` table
 """
@@ -44,10 +44,19 @@ INLINE_PROMPT_TEMPLATE = (
 
 
 def _save_image(raw_bytes: bytes, dest_path: Path) -> int:
-    """Persist bytes as PNG. Gemini returns PNG by default; we don't transcode
-    here to avoid pulling in Pillow."""
+    """Persist bytes as WebP (~5-10% the size of Gemini's source PNG).
+    Falls back to writing raw bytes if Pillow is missing."""
     dest_path.parent.mkdir(parents=True, exist_ok=True)
-    dest_path.write_bytes(raw_bytes)
+    try:
+        import io
+        from PIL import Image  # type: ignore
+
+        img = Image.open(io.BytesIO(raw_bytes))
+        if img.mode in ("RGBA", "LA", "P"):
+            img = img.convert("RGB")
+        img.save(dest_path, format="WEBP", quality=80, method=6)
+    except Exception:
+        dest_path.write_bytes(raw_bytes)
     return dest_path.stat().st_size
 
 
@@ -168,9 +177,9 @@ class ImageAgent(BaseAgent):
         # 1) Hero
         hero_prompt = HERO_PROMPT_TEMPLATE.format(topic=title)
         bytes_, meta = self._generate_image(hero_prompt)
-        hero_path = out_dir / "hero.png"
+        hero_path = out_dir / "hero.webp"
         size = _save_image(bytes_, hero_path)
-        url_path = f"/{out_dir_rel}/hero.png"
+        url_path = f"/{out_dir_rel}/hero.webp"
         self._record_image(
             site_id=site_id, article_id=article_id, prompt=hero_prompt,
             url=url_path, alt_text=f"{title} – cover illustration",
@@ -193,9 +202,9 @@ class ImageAgent(BaseAgent):
                     "kind": f"inline_{i}", "url": None, "error": str(e)[:200],
                 })
                 continue
-            inline_path = out_dir / f"inline-{i}.png"
+            inline_path = out_dir / f"inline-{i}.webp"
             size = _save_image(bytes_, inline_path)
-            url_path = f"/{out_dir_rel}/inline-{i}.png"
+            url_path = f"/{out_dir_rel}/inline-{i}.webp"
             self._record_image(
                 site_id=site_id, article_id=article_id, prompt=prompt,
                 url=url_path, alt_text=topic, provider=provider, model=model,

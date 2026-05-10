@@ -145,6 +145,12 @@ def main() -> int:
             print(f"⛔ Budget cap ${args.budget_usd:.2f} reached; stopping.")
             break
 
+        # Skip when hero image already exists — re-running is wasteful
+        hero_dir = SITE_REPO / "public" / "img" / slug
+        if (hero_dir / "hero.webp").exists() or (hero_dir / "hero.png").exists():
+            print(f"↪︎  hero exists, skip: {slug}")
+            continue
+
         print(f"▶ {title}")
         print(f"  type={atype} slug={slug}")
         topics = _section_topics(outline, max_n=args.inline)
