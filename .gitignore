@@ -1,0 +1,27 @@
+# Environment / Credentials
+.env
+.env.local
+.env.*.local
+*-credentials.json
+*-service-account.json
+secrets/
+**/credentials.json
+**/api_keys.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
