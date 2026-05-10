@@ -6,6 +6,7 @@ import json
 from datetime import date, timedelta
 from typing import Any
 
+from src.agents._json_extract import extract_json
 from src.agents.base import BaseAgent
 from src.db.client import get_db_connection
 
@@ -39,7 +40,7 @@ Reply ONLY with JSON in this exact shape (no markdown fence):
 class KeywordSelectorAgent(BaseAgent):
     name = "keyword_selector"
     task_type = "keyword_selection"      # not present in site_config
-    max_retries = 1                      # selection is cheap; retry once on parse fail
+    max_retries = 3                      # selection is cheap; retry up to 3x on parse fail
 
     def get_model(self) -> str:
         # Override: use outline_model since site_config has no keyword_selection_model
@@ -93,9 +94,9 @@ class KeywordSelectorAgent(BaseAgent):
         )
 
         resp = self._call_llm(
-            prompt=prompt, max_tokens=2000, temperature=0.3, json_mode=True,
+            prompt=prompt, max_tokens=4000, temperature=0.3, json_mode=True,
         )
-        choice = json.loads(resp.text)
+        choice = extract_json(resp.text)
         # Validate keyword_id is in candidate set
         cand_ids = {c["keyword_id"] for c in candidates}
         if choice.get("keyword_id") not in cand_ids:
