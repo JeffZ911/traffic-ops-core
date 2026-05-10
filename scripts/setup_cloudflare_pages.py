@@ -66,12 +66,15 @@ def main() -> int:
 
     # ------------------------------------------------------ 1. Verify
     step("1. Verify token + account")
-    r = _api("GET", "/user/tokens/verify")
-    j = _ok(r)
-    print(f"   token status: {j['result']['status']}")
-    r = _api("GET", f"/accounts/{CF_ACCOUNT_ID}")
-    j = _ok(r)
-    print(f"   account: {j['result']['name']}")
+    # The cfat_-prefixed token cannot hit /user/tokens/verify, so probe a
+    # permission-bearing endpoint instead.
+    r = _api("GET", f"/accounts/{CF_ACCOUNT_ID}/pages/projects")
+    if r.status_code == 403 or not r.json().get("success"):
+        print("   ❌ Pages API not accessible. Token needs "
+              "'Account > Cloudflare Pages > Edit'.")
+        return 1
+    print(f"   ✓ Pages API reachable; existing projects: "
+          f"{len(r.json().get('result') or [])}")
 
     # ------------------------------------------------------ 2. Locate zone
     step(f"2. Locate {SITE_DOMAIN} zone")

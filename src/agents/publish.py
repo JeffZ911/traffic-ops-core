@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from src.agents._ad_inject import inject_ads
 from src.agents.base import BaseAgent
 from src.db.client import get_db_connection
 
@@ -154,11 +155,20 @@ class PublishAgent(BaseAgent):
         if article_type == "character_db" and isinstance(article["outline"], dict):
             fm["character_data"] = article["outline"]
 
+        # Inject in-article AdSense slots (top / mid / end) when the site
+        # has a configured publisher id. Idempotent.
+        pub_id = (
+            self.site_config.get("adsense_publisher_id")
+            or self.site_config.get("adsense", {}).get("publisher_id")
+            or ""
+        )
+        content = inject_ads(article["content_md"] or "", pub_id)
+
         body = (
             "---\n"
             + _emit_yaml(fm)
             + "\n---\n\n"
-            + (article["content_md"] or "")
+            + content
             + "\n"
         )
         out_path.write_text(body, encoding="utf-8")
