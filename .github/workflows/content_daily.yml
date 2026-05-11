@@ -203,6 +203,32 @@ jobs:
         run: |
           python -m scripts.backfill_one_under_imaged --budget-usd 0.40
 
+      # ---------------------------------------------------------------- 5c.
+      # Closing the GSC feedback loop: rewrite ONE published article per
+      # day, picked from the latest seo_intelligence_weekly report's
+      # rewrite_candidates list. Skipped at 'limit_extras' (Pro-model
+      # call is ~$0.60/run, biggest single AI expense in the cron).
+      # Safety brake lives in scripts/rewrite_one_article.py — articles
+      # with 3 failed rewrites are auto-marked rewrite_skipped.
+      # continue-on-error: this is incremental optimization, not core
+      # publishing — a crash here must not block today's deploy.
+      - name: Rewrite 1 page-2 article (GSC feedback loop)
+        if: steps.budget.outputs.action == 'normal' || steps.budget.outputs.action == 'warn'
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+          SITE_REPO_PATH: ${{ github.workspace }}/ntecodex-site
+        run: |
+          python -m scripts.rewrite_one_article --budget-usd 1.00
+
       # ---------------------------------------------------------------- 7.
       - name: Setup Node 22
         if: env.skip_deploy != 'true'
