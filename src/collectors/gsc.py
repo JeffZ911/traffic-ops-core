@@ -32,15 +32,16 @@ class GSCDaily:
 
 
 def _site_property(site_id: UUID) -> str:
-    cfg = site_config(site_id)
-    # CODE-SPEC: prefer Domain-property form (covers all subdomains)
-    domain = cfg.get("domain") or cfg.get("site_name", "").lower()
-    if not domain:
-        # Fallback: query sites.domain directly
-        from src.db.client import get_db_connection
-        with get_db_connection() as conn, conn.cursor() as cur:
-            cur.execute("select domain from sites where id = %s", (str(site_id),))
-            domain = cur.fetchone()[0]
+    """Authoritative domain is `sites.domain`; sites.config.site_name is the
+    human label ("NTE Codex"), not a hostname — don't read it here."""
+    from src.db.client import get_db_connection
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute("select domain from sites where id = %s", (str(site_id),))
+        row = cur.fetchone()
+        if not row or not row[0]:
+            raise RuntimeError(f"sites.domain missing for site_id {site_id}")
+        domain = row[0]
+    # Prefer Domain-property form (covers all subdomains)
     return f"sc-domain:{domain}"
 
 
