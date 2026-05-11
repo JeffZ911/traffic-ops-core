@@ -153,6 +153,11 @@ def main() -> int:
     p.add_argument("--force-regenerate", action="store_true",
                    help="Overwrite existing hero/inline files (used by the "
                         "retrofit workflow to upgrade old 3-image articles).")
+    p.add_argument("--slug", default=None,
+                   help="Process only the article with this exact slug. Used "
+                        "by the daily backfill step to target one specific "
+                        "under-imaged article instead of always picking "
+                        "ordered-by-published_at.")
     args = p.parse_args()
 
     if not SITE_REPO.exists():
@@ -167,19 +172,23 @@ def main() -> int:
             return 2
         site_id, config = site_row
 
-        when_clause = (
-            "and published_at > now() - interval '48 hours'"
-            if args.new_only else ""
-        )
+        clauses: list[str] = []
+        params: list = [str(site_id)]
+        if args.new_only:
+            clauses.append("and published_at > now() - interval '48 hours'")
+        if args.slug:
+            clauses.append("and slug = %s")
+            params.append(args.slug)
+        params.append(args.limit)
         cur.execute(
             f"""
             select id, slug, title, article_type, outline
               from articles
-             where site_id = %s and status = 'published' {when_clause}
+             where site_id = %s and status = 'published' {' '.join(clauses)}
              order by published_at
              limit %s
             """,
-            (str(site_id), args.limit),
+            tuple(params),
         )
         rows = cur.fetchall()
 

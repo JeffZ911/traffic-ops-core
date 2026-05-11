@@ -1,11 +1,24 @@
 """Keep the keyword pool topped up so the daily cron never starves.
 
-If `keywords` for the site has fewer than --min-planned rows in status='planned',
-ask Gemini (with Google Search grounding) for fresh long-tail keyword ideas
-balanced across the diversity-required article types. Newly proposed words are
-inserted with status='planned' and source='auto_seed'.
+Two modes (controlled by flags):
 
-Idempotent: dedupes against existing keywords (case-insensitive).
+1. **Pool top-up** (always runs first): if `keywords` for the site has
+   fewer than --min-planned rows in status='planned', ask Gemini (with
+   Google Search grounding) for fresh long-tail keyword ideas balanced
+   across the diversity-required article types. Inserted with
+   `status='planned'`, `source='auto_seed'`.
+
+2. **Type-deficit auto-seed** (--auto-balance-types): scans the last
+   14 days of `articles.published_at` per article_type. For each type
+   with **zero** published in that window, asks the LLM for 5-10 seed
+   keywords specifically tailored to that type. Inserted with
+   `source='auto_type_balance'`. This replaces the old manual
+   `banner_batch` workflow — the gardener now sees Banner's 14-day
+   drought and auto-seeds banner keywords, which the diversity-aware
+   KeywordSelector then picks up on subsequent crons.
+
+Idempotent in both modes: dedupes against existing keywords
+(case-insensitive).
 """
 
 from __future__ import annotations
@@ -76,6 +89,157 @@ def _existing_keywords(cur, site_id: UUID, sample_n: int = 60) -> set[str]:
     return {r[0] for r in cur.fetchall()}
 
 
+TYPE_BALANCE_PROMPT = """You are an SEO researcher for {game_name} (abbreviation
+{game_abbr}, released {release_date}).
+
+We notice ZERO articles published in the last 14 days for the
+'{article_type}' content category. We need to fix that by seeding the
+keyword pool with 5-8 keywords that NATURALLY fit this category:
+
+  {article_type}: {type_hint}
+
+Existing keywords (DO NOT duplicate, case-insensitive):
+{existing_sample}
+
+Use Google Search to find current player-search-intent for {game_name}.
+Keywords MUST be true to the category — do not stretch a tier-list query
+into a banner article. If the category truly has no realistic queries
+yet (game too new to have e.g. patch notes), return an empty array.
+
+Reply ONLY with a single JSON array (no markdown fence). Each element:
+{{
+  "keyword": "<lowercase, 3-7 words, ideally containing 'nte' or 'neverness'>",
+  "intent": "informational | comparison | how-to | list",
+  "priority_score": <integer 60-85>,
+  "notes": "<one short reason>"
+}}
+"""
+
+
+def auto_balance_types(
+    cur,
+    site_id: UUID,
+    config: dict,
+    existing: set[str],
+    budget_usd: float,
+) -> tuple[int, float]:
+    """Seed keywords for any article_type with 0 published in the last 14d.
+
+    Returns (rows_inserted, cumulative_cost_usd).
+    """
+    from datetime import date, timedelta
+    cur.execute(
+        """
+        select article_type, count(*)
+          from articles
+         where site_id = %s
+           and status = 'published'
+           and published_at >= %s
+         group by article_type
+        """,
+        (str(site_id), date.today() - timedelta(days=14)),
+    )
+    have_recent = {r[0] for r in cur.fetchall() if r[0]}
+    starved = [t for t in TYPE_HINTS if t not in have_recent]
+
+    if not starved:
+        print("   ⚖️  all article_types have recent coverage — nothing to balance")
+        return 0, 0.0
+
+    print(f"   ⚖️  starved types (0 published / 14d): {starved}")
+    provider = get_llm_provider("gemini")
+    text_cfg = config.get("text_provider") or {}
+    model = (
+        text_cfg.get("keyword_research_model")
+        or text_cfg.get("outline_model")
+        or "gemini-3-flash-preview"
+    )
+    game = config.get("game", {})
+
+    existing_sample = sorted(existing)
+    if len(existing_sample) > 50:
+        existing_sample = existing_sample[:25] + existing_sample[-25:]
+    existing_lines = "\n".join(f"  - {kw}" for kw in existing_sample) or "  (empty pool)"
+
+    total_inserted = 0
+    cumulative_cost = 0.0
+
+    for atype in starved:
+        if cumulative_cost >= budget_usd:
+            print(f"   ⛔ auto-balance budget cap ${budget_usd:.2f} hit; "
+                  f"stopping at {atype}")
+            break
+        prompt = TYPE_BALANCE_PROMPT.format(
+            game_name=game.get("name", "the game"),
+            game_abbr=game.get("abbreviation", ""),
+            release_date=game.get("release_date", "recently"),
+            article_type=atype,
+            type_hint=TYPE_HINTS.get(atype, "general content"),
+            existing_sample=existing_lines,
+        )
+        try:
+            resp = provider.generate(
+                prompt=prompt, model=model, max_tokens=2000, temperature=0.4,
+                json_mode=True, enable_search=True,
+            )
+        except Exception as e:
+            print(f"   ⚠️  LLM call for {atype!r} failed: {e}")
+            continue
+        cumulative_cost += float(resp.cost_usd or 0)
+
+        try:
+            data = json.loads(resp.text.strip())
+        except Exception:
+            try:
+                wrapped = extract_json("{\"items\": " + resp.text + "}")
+                data = wrapped.get("items", [])
+            except Exception:
+                print(f"   ⚠️  parse failed for {atype!r}; skipping")
+                continue
+        if not isinstance(data, list):
+            if isinstance(data, dict):
+                for k in ("keywords", "items", "results"):
+                    if k in data and isinstance(data[k], list):
+                        data = data[k]
+                        break
+            if not isinstance(data, list):
+                continue
+
+        inserted_for_type = 0
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            kw = (item.get("keyword") or "").strip().lower()
+            if not kw or kw in existing:
+                continue
+            try:
+                cur.execute(
+                    """
+                    insert into keywords
+                      (site_id, keyword, intent, priority_score,
+                       source, notes, status)
+                    values (%s, %s, %s, %s, 'auto_type_balance', %s, 'planned')
+                    on conflict (site_id, keyword) do nothing
+                    """,
+                    (
+                        str(site_id),
+                        item.get("keyword"),
+                        item.get("intent"),
+                        int(item.get("priority_score") or 70),
+                        f"[auto-balance:{atype}] " + (item.get("notes") or "")[:400],
+                    ),
+                )
+                if cur.rowcount:
+                    inserted_for_type += 1
+                    existing.add(kw)
+            except Exception as e:
+                print(f"   ⚠️  insert skip {kw!r}: {e}")
+        total_inserted += inserted_for_type
+        print(f"   ⚖️  {atype}: +{inserted_for_type} (LLM cost ${resp.cost_usd:.4f})")
+
+    return total_inserted, cumulative_cost
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--min-planned", type=int, default=20,
@@ -85,6 +249,11 @@ def main() -> int:
     p.add_argument("--budget-usd", type=float, default=0.50)
     p.add_argument("--force", action="store_true",
                    help="Top up even if already above threshold")
+    p.add_argument("--auto-balance-types", action="store_true",
+                   help="After pool top-up, also scan for article_types with "
+                        "0 published in the last 14 days and auto-seed 5-8 "
+                        "keywords per starved type (source='auto_type_balance'). "
+                        "Skipped if planned pool already has ≥40 keywords.")
     args = p.parse_args()
 
     with get_db_connection() as conn, conn.cursor() as cur:
@@ -224,6 +393,31 @@ def main() -> int:
                 print(f"   ⚠️ skip {item.get('keyword')!r}: {e}")
 
     print(f"   ✅ inserted {inserted} new keyword(s); cost ${resp.cost_usd:.4f}")
+
+    # Optional second pass: type-deficit balance.
+    if args.auto_balance_types:
+        # Skip if the topup already brought the pool to a comfortable size —
+        # the diversity-weighted KeywordSelector should be able to find
+        # under-represented types from existing inventory without burning
+        # another LLM call per starved type.
+        with get_db_connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "select count(*) from keywords where site_id = %s and status = 'planned'",
+                (str(site_id),),
+            )
+            planned_after = cur.fetchone()[0]
+        if planned_after >= 40:
+            print(f"   ⚖️  pool now {planned_after} planned — skip auto-balance "
+                  f"(KeywordSelector diversity bonus will cover starved types)")
+        else:
+            print(f"\n⚖️  Auto-balance starved article_types (budget cap "
+                  f"${args.budget_usd:.2f})")
+            with get_db_connection(autocommit=True) as conn, conn.cursor() as cur:
+                bal_inserted, bal_cost = auto_balance_types(
+                    cur, site_id, config, existing, args.budget_usd
+                )
+            print(f"   ⚖️  total auto-balance: +{bal_inserted} rows, "
+                  f"cumulative ${bal_cost:.4f}")
     return 0
 
 

@@ -44,7 +44,73 @@ jobs:
           git config user.email "${{ secrets.GIT_USER_EMAIL }}"
 
       # ---------------------------------------------------------------- 0.
+      # Budget guard runs FIRST, before any cost-incurring step. Reads
+      # sites.config.monthly_budget_usd (default $30) and the running
+      # month-to-date sum of agent_runs.cost_usd. Sets two env flags the
+      # later steps key on:
+      #   BUDGET_ACTION=normal|warn|limit_extras|pause_all
+      #   BUDGET_PERCENT=<float 0-1+>
+      # On 'pause_all' the workflow exits 0 immediately (it's a controlled
+      # stop, not a failure) so we don't burn red badges in the dashboard.
+      - name: Budget guard
+        id: budget
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set +e
+          python -m src.utils.budget_guard --json > /tmp/budget.json
+          rc=$?
+          cat /tmp/budget.json
+          ACTION=$(python -c "import json; print(json.load(open('/tmp/budget.json'))['action'])")
+          PERCENT=$(python -c "import json; print(json.load(open('/tmp/budget.json'))['percent'])")
+          SPENT=$(python -c "import json; print(json.load(open('/tmp/budget.json'))['spent_usd'])")
+          BUDGET=$(python -c "import json; print(json.load(open('/tmp/budget.json'))['budget_usd'])")
+          echo "action=$ACTION"   >> "$GITHUB_OUTPUT"
+          echo "percent=$PERCENT" >> "$GITHUB_OUTPUT"
+          echo "spent=$SPENT"     >> "$GITHUB_OUTPUT"
+          echo "budget=$BUDGET"   >> "$GITHUB_OUTPUT"
+          # rc=78 means "pause_all" — emit early-stop email and bail.
+          if [ "$rc" = "78" ]; then
+            echo "🛑 Budget guard says pause_all — short-circuiting workflow."
+          fi
+
+      - name: Alert on pause_all
+        if: steps.budget.outputs.action == 'pause_all'
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+        run: |
+          python -m src.utils.send_alert \
+            --type=budget_pause \
+            --workflow=content_daily \
+            --severity=warning \
+            --subject="[ntecodex] daily cron paused — monthly budget at ${{ steps.budget.outputs.percent }}" \
+            --message="month-to-date spend ${{ steps.budget.outputs.spent }} of ${{ steps.budget.outputs.budget }}. Daily cron skipped. Resumes automatically on month rollover, or set sites.config.cron_paused=false to re-enable manually."
+
+      - name: Alert on budget warn / limit_extras
+        if: steps.budget.outputs.action == 'warn' || steps.budget.outputs.action == 'limit_extras'
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+        run: |
+          python -m src.utils.send_alert \
+            --type=budget_warning \
+            --workflow=content_daily \
+            --severity=info \
+            --subject="[ntecodex] budget ${{ steps.budget.outputs.action }} — ${{ steps.budget.outputs.spent }} of ${{ steps.budget.outputs.budget }}" \
+            --message="action=${{ steps.budget.outputs.action }}. Core daily article will still be produced; maintenance tasks may be skipped if limit_extras."
+
+      # ---------------------------------------------------------------- 1.
       - name: Collect yesterday's GA4 + GSC metrics
+        if: steps.budget.outputs.action != 'pause_all'
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -55,17 +121,34 @@ jobs:
           NTECODEX_GA4_PROPERTY_ID: ${{ secrets.NTECODEX_GA4_PROPERTY_ID }}
         run: python -m scripts.run_collectors
 
-      # ---------------------------------------------------------------- 1.
+      # ---------------------------------------------------------------- 2.
+      # Pool top-up + auto-balance starved article types. The
+      # --auto-balance-types flag was added in v1.1.x; it scans for
+      # categories with 0 published / 14d and auto-seeds 5-8 keywords
+      # each (source='auto_type_balance'). KeywordSelector's diversity
+      # bonus then surfaces those on subsequent crons — replaces the
+      # old manual banner_batch workflow.
+      # When the budget action is 'limit_extras' (>80% spent), the
+      # auto-balance pass is dropped to save an LLM call per starved
+      # type — the core top-up still runs.
       - name: Garden the keyword pool
+        if: steps.budget.outputs.action != 'pause_all'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: python -m scripts.keyword_gardener --min-planned 20 --target 12
+        run: |
+          if [ "${{ steps.budget.outputs.action }}" = "limit_extras" ]; then
+            python -m scripts.keyword_gardener --min-planned 20 --target 12
+          else
+            python -m scripts.keyword_gardener --min-planned 20 --target 12 \
+              --auto-balance-types
+          fi
 
-      # ---------------------------------------------------------------- 2.
+      # ---------------------------------------------------------------- 3.
       - name: Generate one article (orchestrator)
+        if: steps.budget.outputs.action != 'pause_all'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -73,8 +156,9 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python -m scripts.run_one_article_smoke
 
-      # ---------------------------------------------------------------- 3.
+      # ---------------------------------------------------------------- 4.
       - name: Publish article markdown to ntecodex-site
+        if: steps.budget.outputs.action != 'pause_all'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -83,8 +167,16 @@ jobs:
           SITE_REPO_PATH: ${{ github.workspace }}/ntecodex-site
         run: python -m scripts.publish_articles
 
-      # ---------------------------------------------------------------- 4.
-      - name: Generate hero + 2 inline images for the new article
+      # ---------------------------------------------------------------- 5.
+      # The new-article image step covers TODAY's article. The retrofit
+      # step (5b) backfills older articles that were published with the
+      # pre-v1.1 1+2 image template. Both share Pillow install.
+      - name: Install Pillow (image processing)
+        if: steps.budget.outputs.action != 'pause_all'
+        run: pip install --quiet Pillow
+
+      - name: Generate hero + 6 inline images for the NEW article
+        if: steps.budget.outputs.action != 'pause_all'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -92,23 +184,26 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           SITE_REPO_PATH: ${{ github.workspace }}/ntecodex-site
         run: |
-          pip install --quiet Pillow
-          python -m scripts.run_image_for_articles --new-only --inline 2 --budget-usd 0.50
+          python -m scripts.run_image_for_articles --new-only --inline 6 --budget-usd 0.50
 
-      # ---------------------------------------------------------------- 5.
-      - name: Commit & push markdown to ntecodex-site (source of truth)
-        working-directory: ntecodex-site
+      # ---------------------------------------------------------------- 5b.
+      # Backfill the OLDEST article that has fewer than 4 inline images
+      # in the DB. Skipped when the budget is at 'limit_extras' or higher
+      # so the core "produce today's article" path stays funded. One
+      # backfill / day caps the spend at ~$0.27/day.
+      - name: Backfill 1 under-imaged article
+        if: steps.budget.outputs.action == 'normal' || steps.budget.outputs.action == 'warn'
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SITE_REPO_PATH: ${{ github.workspace }}/ntecodex-site
         run: |
-          if [[ -n "$(git status --porcelain)" ]]; then
-            git add .
-            git commit -m "[auto] daily pipeline: $(date -u +%Y-%m-%d)"
-            git push
-          else
-            echo "no changes — pipeline produced no new article today"
-            echo "skip_deploy=true" >> $GITHUB_ENV
-          fi
+          python -m scripts.backfill_one_under_imaged --budget-usd 0.40
 
-      # ---------------------------------------------------------------- 6.
+      # ---------------------------------------------------------------- 7.
       - name: Setup Node 22
         if: env.skip_deploy != 'true'
         uses: actions/setup-node@v4
