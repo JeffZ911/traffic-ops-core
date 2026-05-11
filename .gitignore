@@ -25,3 +25,7 @@ build/
 .vscode/
 .idea/
 .DS_Store
+
+# Backup files (never commit)
+*.bak
+env*.bak

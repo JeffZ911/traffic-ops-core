@@ -43,6 +43,18 @@ jobs:
           git config user.name "${{ secrets.GIT_USER_NAME }}"
           git config user.email "${{ secrets.GIT_USER_EMAIL }}"
 
+      # ---------------------------------------------------------------- 0.
+      - name: Collect yesterday's GA4 + GSC metrics
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+          NTECODEX_GA4_PROPERTY_ID: ${{ secrets.NTECODEX_GA4_PROPERTY_ID }}
+        run: python -m scripts.run_collectors
+
       # ---------------------------------------------------------------- 1.
       - name: Garden the keyword pool
         env:
