@@ -14,6 +14,10 @@ from typing import Any
 from uuid import UUID
 
 from src.agents.base import BaseAgent
+from src.agents._internal_links import (
+    build_keyword_lookup_from_articles,
+    inject_internal_links,
+)
 from src.db.client import get_db_connection
 
 
@@ -139,10 +143,21 @@ class PublishAgent(BaseAgent):
         published_url = url_pattern.format(slug=slug)
         published_at = datetime.now(timezone.utc)
 
+        # Astro Content Collections derives an entry's slug from the file
+        # path *relative to the collection root*. When we write to a
+        # sub-folder (e.g. guides/reroll/<slug>.md), the entry.slug Astro
+        # exposes is "reroll/<slug>" — and the homepage / listing pages
+        # build URLs from entry.slug. If frontmatter `slug` doesn't match
+        # that sub-path, Astro lets frontmatter override → JS gets the
+        # wrong slug → listing pages produce dead links.
+        # Always write the *collection-relative* path here.
+        rel_without_collection = rel.split("/", 1)[1] if "/" in rel else rel
+        entry_slug = rel_without_collection[:-len(".md")] if rel_without_collection.endswith(".md") else rel_without_collection
+
         # Build frontmatter
         fm: dict[str, Any] = {
             "title": article["title"] or slug,
-            "slug": slug,
+            "slug": entry_slug,
             "article_type": article_type,
             "qa_score": float(article["qa_score"] or 0),
             "word_count": int(article["word_count"] or 0),
@@ -158,11 +173,36 @@ class PublishAgent(BaseAgent):
         # adsbygoogle.js loader in BaseLayout is enough. We no longer
         # inject <ins> blocks at publish time; old _ad_inject.py is kept
         # in the tree for reference / future opt-out scenarios.
+
+        # Auto-insert internal links: pull every other published article's
+        # name + URL, then walk this article's body and replace the first
+        # occurrence of each matching name with a markdown link. Skips
+        # code blocks, headings, and existing links.
+        with get_db_connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                select title, published_url, article_type, outline
+                  from articles
+                 where status = 'published' and id <> %s
+                """,
+                (str(article_id),),
+            )
+            link_cols = [d.name for d in cur.description]
+            other_rows = [dict(zip(link_cols, r)) for r in cur.fetchall()]
+        keyword_lookup = build_keyword_lookup_from_articles(other_rows)
+        content_md = article["content_md"] or ""
+        if keyword_lookup:
+            content_md, linked_keywords = inject_internal_links(
+                content_md, keyword_lookup, self_url=published_url
+            )
+        else:
+            linked_keywords = []
+
         body = (
             "---\n"
             + _emit_yaml(fm)
             + "\n---\n\n"
-            + (article["content_md"] or "")
+            + content_md
             + "\n"
         )
         out_path.write_text(body, encoding="utf-8")
@@ -187,4 +227,5 @@ class PublishAgent(BaseAgent):
             "published_url": published_url,
             "bytes_written": len(body.encode("utf-8")),
             "source_count": len(fm["sources"]),
+            "linked_keywords": linked_keywords,
         }
