@@ -49,9 +49,12 @@ Strict requirements:
   "remember that", "it's important to note".
 - Be specific with numbers/effects from search results. If a number is not
   available from search, write "[information unavailable]" rather than guessing.
-- Internal-link anchors: use the relative-path placeholder
-  `[anchor text](#TODO:keyword:<target-keyword>)` instead of any external URL.
-  Example: `[NTE Reroll Guide](#TODO:keyword:nte-reroll-guide)`
+- DO NOT insert any internal links (no `<a>` tags, no markdown `[text](url)`
+  pointing to other articles on this site). The CMS adds related-article
+  links automatically after publication. External citations belong in the
+  Sources section only — not inline.
+- Do not embed any `<img>` tags or `![alt](url)` markdown images in the
+  article body. Hero and section images are added by the CMS post-publish.
 - End with a `## Sources` H2 listing the URLs you used (1 line per source).
 
 Reply with the Markdown body ONLY. No preamble, no JSON wrapping, no fences.
