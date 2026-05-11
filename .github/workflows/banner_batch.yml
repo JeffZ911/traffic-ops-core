@@ -1,0 +1,143 @@
+name: Banner batch (seed + generate N news articles)
+
+# Manual one-shot. Seeds 8 banner-topic keywords (idempotent), then runs
+# the pipeline up to N times forcing article_type='news'. Each run picks
+# from the planned keyword pool — the diversity bonus + banner-seed
+# priority pushes banner keywords to the top. After all articles
+# complete, generates 1+6 images per article, commits to the site repo,
+# and deploys.
+
+on:
+  workflow_dispatch:
+    inputs:
+      count:
+        description: 'How many banner articles to generate'
+        type: string
+        default: '5'
+      budget_usd:
+        description: 'Hard cap on text+image cumulative cost (USD)'
+        type: string
+        default: '3.00'
+
+concurrency:
+  group: banner-batch
+  cancel-in-progress: false
+
+jobs:
+  batch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout traffic-ops-core
+        uses: actions/checkout@v4
+
+      - name: Checkout ntecodex-site (cross-repo)
+        uses: actions/checkout@v4
+        with:
+          repository: JeffZ911/ntecodex-site
+          token: ${{ secrets.SITE_REPO_PAT }}
+          path: ntecodex-site
+          fetch-depth: 0
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Python deps + Pillow
+        run: |
+          pip install -e .
+          pip install --quiet Pillow
+
+      - name: Configure git for site repo
+        working-directory: ntecodex-site
+        run: |
+          git config user.name "${{ secrets.GIT_USER_NAME }}"
+          git config user.email "${{ secrets.GIT_USER_EMAIL }}"
+
+      - name: Seed banner-topic keywords (idempotent)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: python -m scripts.seed_banner_keywords
+
+      - name: Generate N banner articles (force-type=news)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          python -m scripts.run_batch_articles \
+            --count ${{ github.event.inputs.count }} \
+            --max-retries 1 \
+            --budget-usd ${{ github.event.inputs.budget_usd }} \
+            --force-type news
+
+      - name: Publish new article markdown
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SITE_REPO_PATH: ${{ github.workspace }}/ntecodex-site
+        run: python -m scripts.publish_articles
+
+      - name: Generate hero + 6 inline images for each new article
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SITE_REPO_PATH: ${{ github.workspace }}/ntecodex-site
+        run: |
+          python -m scripts.run_image_for_articles \
+            --new-only --inline 6 --budget-usd ${{ github.event.inputs.budget_usd }}
+
+      - name: Commit & push to ntecodex-site
+        working-directory: ntecodex-site
+        run: |
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git add public/img src/content
+            git commit -m "[auto] banner batch: ${{ github.event.inputs.count }} news articles"
+            git push
+          else
+            echo "no changes — batch produced nothing"
+            echo "skip_deploy=true" >> $GITHUB_ENV
+          fi
+
+      - name: Setup Node 22
+        if: env.skip_deploy != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build + deploy Astro site
+        if: env.skip_deploy != 'true'
+        working-directory: ntecodex-site
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npm install
+          npm run build
+          npx --yes wrangler@latest pages deploy dist \
+            --project-name ntecodex --branch main --commit-dirty=true
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+        run: |
+          python -m src.utils.send_alert \
+            --type=pipeline_failure \
+            --workflow=banner_batch \
+            --severity=warning \
+            --subject="Banner batch workflow failed" \
+            --message="Run ${{ github.run_id }} failed. ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

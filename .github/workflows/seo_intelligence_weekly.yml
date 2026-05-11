@@ -1,0 +1,73 @@
+name: SEO intelligence (weekly)
+
+# Pulls the last 14 days of GSC data, discovers long-tail queries Google
+# already shows the site for, flags low-rank rewrite candidates, and
+# persists a weekly report to daily_reports.data_snapshot.seo_intelligence.
+# Runs every Monday 03:00 UTC (= 11:00 Asia/Shanghai).
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Compute but do not write to DB / send email'
+        type: boolean
+        default: false
+
+concurrency:
+  group: seo-intelligence
+  cancel-in-progress: false
+
+jobs:
+  weekly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install deps
+        run: pip install -e .
+
+      - name: Run seo_intelligence
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+        run: |
+          if [[ "${{ github.event.inputs.dry_run }}" == "true" ]]; then
+            python -m src.maintenance.seo_intelligence --dry-run
+          else
+            python -m src.maintenance.seo_intelligence
+          fi
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+        run: |
+          python -m src.utils.send_alert \
+            --type=pipeline_failure \
+            --workflow=seo_intelligence_weekly \
+            --severity=warning \
+            --subject="Weekly SEO intelligence run failed" \
+            --message="Run ${{ github.run_id }} failed. ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

@@ -26,6 +26,14 @@ from src.db.client import get_db_connection
 from src.db.model_catalog_client import get_model as get_catalog_entry
 
 
+# Per Part A.2 of Phase 1.B: produce 1 hero + up to 6 inline images per
+# article (cap 7 total, ~$0.27 per article). Each inline image is keyed
+# to a specific H2 section topic so the article body can interleave them
+# at PublishAgent injection time.
+MAX_IMAGES_PER_ARTICLE = 7        # hard cost ceiling (single article)
+DEFAULT_INLINE_COUNT = 6          # default H2-section count to illustrate
+
+
 HERO_PROMPT_TEMPLATE = (
     "Concept art for a fantasy gacha game guide article. "
     "Theme: {topic}. "
@@ -36,10 +44,12 @@ HERO_PROMPT_TEMPLATE = (
 )
 
 INLINE_PROMPT_TEMPLATE = (
-    "Subject illustration for a section about {topic} in a fantasy gacha game guide. "
-    "Style: digital painting, focused subject, atmospheric lighting, no text, "
-    "no realistic human faces, no copyrighted character likenesses. "
-    "Aspect ratio: 16:9."
+    "Subject illustration for the '{topic}' section of a guide article about "
+    "{article_theme}. Style: digital painting, focused subject, atmospheric "
+    "lighting, 16:9 horizontal composition, no text, no realistic human faces, "
+    "no copyrighted character likenesses. Make the composition clearly "
+    "different from a hero/cover shot — show one specific concept or scene "
+    "from this section."
 )
 
 
@@ -156,7 +166,14 @@ class ImageAgent(BaseAgent):
         title = input_data.get("title", slug)
         article_type = input_data.get("article_type", "")
         section_topics: list[str] = input_data.get("section_topics", [])
-        n_inline = int(input_data.get("inline_count", 2))
+        # Default to a multi-image article (1 hero + up to 6 inline). Caller
+        # can pass `inline_count` to override, but it's clamped to
+        # MAX_IMAGES_PER_ARTICLE - 1 so a single article can never exceed
+        # the cost ceiling.
+        n_inline = min(
+            int(input_data.get("inline_count", DEFAULT_INLINE_COUNT)),
+            MAX_IMAGES_PER_ARTICLE - 1,
+        )
 
         # Look up cost from model_catalog
         model = self.get_model()
@@ -192,9 +209,11 @@ class ImageAgent(BaseAgent):
             "duration_ms": meta["duration_ms"],
         })
 
-        # 2) Inline images for the first N section topics
+        # 2) Inline images for the first N section topics. Each inline image
+        # is bound to a specific H2 by index so PublishAgent can interleave
+        # them with the matching section at injection time.
         for i, topic in enumerate(section_topics[:n_inline], start=1):
-            prompt = INLINE_PROMPT_TEMPLATE.format(topic=topic)
+            prompt = INLINE_PROMPT_TEMPLATE.format(topic=topic, article_theme=title)
             try:
                 bytes_, meta = self._generate_image(prompt)
             except Exception as e:
@@ -214,6 +233,8 @@ class ImageAgent(BaseAgent):
             results.append({
                 "kind": f"inline_{i}", "url": url_path, "bytes": size,
                 "duration_ms": meta["duration_ms"],
+                "section_topic": topic,   # PublishAgent uses this to pair
+                                          # the image with the matching H2.
             })
 
         return {

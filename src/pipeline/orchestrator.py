@@ -101,6 +101,7 @@ def run_one_article(
     *,
     log=print,
     max_retry_rounds_override: Optional[int] = None,
+    force_article_type: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Execute the full pipeline for ONE article. Returns a summary dict.
@@ -128,6 +129,10 @@ def run_one_article(
     keyword_id = UUID(sel["keyword_id"])
     keyword = sel["keyword_text"]
     article_type = sel["article_type"]
+    if force_article_type and force_article_type != article_type:
+        log(f"  Overriding article_type {article_type!r} → {force_article_type!r} "
+            f"(force_article_type set by caller)")
+        article_type = force_article_type
     log(f"  Selected: {keyword!r} → {article_type}  (reason: {sel.get('reason')})")
     summary["stages"].append({"agent": "keyword_selector", **sel})
     summary["keyword_id"] = str(keyword_id)

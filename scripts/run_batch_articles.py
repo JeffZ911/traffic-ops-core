@@ -27,6 +27,10 @@ def main() -> int:
                    help="Override site_config qa_thresholds.max_retry_rounds")
     p.add_argument("--budget-usd", type=float, default=1.0,
                    help="Stop if cumulative cost exceeds this")
+    p.add_argument("--force-type", default=None,
+                   help="Override KeywordSelector's article_type decision. "
+                        "Must be one of: build, tier_list, boss_guide, reroll, "
+                        "character_db, weapon_db, news, faq, comparison.")
     args = p.parse_args()
 
     with get_db_connection() as conn, conn.cursor() as cur:
@@ -46,7 +50,9 @@ def main() -> int:
         print(f"\n{'#' * 78}\n# Article {i}/{args.count}\n{'#' * 78}")
         try:
             summary = run_one_article(
-                site_id, max_retry_rounds_override=args.max_retries
+                site_id,
+                max_retry_rounds_override=args.max_retries,
+                force_article_type=args.force_type,
             )
         except Exception as e:
             print(f"❌ Article {i} crashed: {type(e).__name__}: {e}")

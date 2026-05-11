@@ -60,8 +60,18 @@ PATH_BY_TYPE: dict[str, str] = {
 }
 
 
-def _patch_frontmatter(md_path: Path, hero_url: str, inline_urls: list[str]) -> bool:
-    """Inject hero_image / inline_images into the YAML frontmatter."""
+def _patch_frontmatter(
+    md_path: Path,
+    hero_url: str,
+    inline_urls: list[str],
+    inline_sections: list[str] | None = None,
+) -> bool:
+    """Inject hero_image / inline_images into the YAML frontmatter AND
+    interleave each inline image into the body just below its matching
+    H2 section. Hero stays in frontmatter only (rendered by Astro above
+    the body), so it doesn't appear twice."""
+    from src.agents._inline_image_inject import inject_inline_images as _inject
+
     text = md_path.read_text(encoding="utf-8")
     # Frontmatter delimited by ---  ...  ---
     m = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
@@ -71,11 +81,27 @@ def _patch_frontmatter(md_path: Path, hero_url: str, inline_urls: list[str]) -> 
     fm = m.group(1)
     body = text[m.end():]
 
-    # Drop any old hero_image / inline_images
+    # Strip any previously-injected `![...](inline-N.webp)` lines from a
+    # prior retrofit run so re-running doesn't accumulate duplicates.
+    # Match any image whose URL contains `/img/<slug>/inline-` — that's
+    # what _inject writes.
+    body = re.sub(
+        r"^\n?!\[[^\]]*\]\(/img/[^/)]+/inline-\d+\.[a-z]+\)\n?",
+        "",
+        body,
+        flags=re.MULTILINE,
+    )
+
+    # Inject inline images into the body (one image per matching H2).
+    if inline_urls:
+        body, _ = _inject(body, inline_urls, inline_sections or [])
+
+    # Drop any old hero_image / inline_images / inline_image_sections blocks
     fm_lines = []
     skip_block = False
+    DROP_KEYS = ("hero_image:", "inline_images:", "inline_image_sections:")
     for line in fm.splitlines():
-        if line.startswith("hero_image:") or line.startswith("inline_images:"):
+        if any(line.startswith(k) for k in DROP_KEYS):
             skip_block = True
             continue
         if skip_block and line.startswith("  -"):
@@ -88,13 +114,21 @@ def _patch_frontmatter(md_path: Path, hero_url: str, inline_urls: list[str]) -> 
         fm_lines.append("inline_images:")
         for u in inline_urls:
             fm_lines.append(f"  - {u}")
+    if inline_sections:
+        # Section labels for each inline_images[i]. PublishAgent uses this
+        # parallel list to interleave images with their matching H2.
+        # JSON-encoded scalars so section titles with quotes/colons are safe.
+        import json as _json
+        fm_lines.append("inline_image_sections:")
+        for s in inline_sections:
+            fm_lines.append(f"  - {_json.dumps(s, ensure_ascii=False)}")
 
     new_text = "---\n" + "\n".join(fm_lines) + "\n---\n" + body
     md_path.write_text(new_text, encoding="utf-8")
     return True
 
 
-def _section_topics(outline: dict | None, max_n: int = 4) -> list[str]:
+def _section_topics(outline: dict | None, max_n: int = 6) -> list[str]:
     if not outline:
         return []
     sections = outline.get("sections") or []
@@ -109,12 +143,16 @@ def _section_topics(outline: dict | None, max_n: int = 4) -> list[str]:
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--budget-usd", type=float, default=5.0)
-    p.add_argument("--inline", type=int, default=2,
-                   help="Inline images per article (in addition to hero)")
+    p.add_argument("--inline", type=int, default=6,
+                   help="Inline images per article, in addition to hero. "
+                        "Default 6 → 7 images per article ≈ $0.27.")
     p.add_argument("--limit", type=int, default=20,
                    help="Max articles to process")
     p.add_argument("--new-only", action="store_true",
                    help="Only consider articles published in the last 48h")
+    p.add_argument("--force-regenerate", action="store_true",
+                   help="Overwrite existing hero/inline files (used by the "
+                        "retrofit workflow to upgrade old 3-image articles).")
     args = p.parse_args()
 
     if not SITE_REPO.exists():
@@ -166,8 +204,12 @@ def main() -> int:
             break
 
         # Skip when hero image already exists — re-running is wasteful
+        # (unless --force-regenerate is set, used by the retrofit workflow
+        # to upgrade older articles from 3 → 7 images).
         hero_dir = SITE_REPO / "public" / "img" / slug
-        if (hero_dir / "hero.webp").exists() or (hero_dir / "hero.png").exists():
+        if not args.force_regenerate and (
+            (hero_dir / "hero.webp").exists() or (hero_dir / "hero.png").exists()
+        ):
             print(f"↪︎  hero exists, skip: {slug}")
             continue
 
@@ -197,6 +239,7 @@ def main() -> int:
         # Build URL lists, patch markdown
         hero_url = ""
         inline_urls: list[str] = []
+        inline_sections: list[str] = []
         for img in result["images"]:
             url = img.get("url")
             if not url:
@@ -205,12 +248,13 @@ def main() -> int:
                 hero_url = url
             elif img["kind"].startswith("inline_"):
                 inline_urls.append(url)
+                inline_sections.append(img.get("section_topic", ""))
 
         rel_path = PATH_BY_TYPE.get(atype, "").format(slug=slug)
         if rel_path:
             md_path = SITE_REPO / "src" / "content" / rel_path
             if md_path.exists() and hero_url:
-                if _patch_frontmatter(md_path, hero_url, inline_urls):
+                if _patch_frontmatter(md_path, hero_url, inline_urls, inline_sections):
                     print(f"  ✓ patched {md_path.relative_to(SITE_REPO)}")
             else:
                 print(f"  ⚠️  md file not found: {md_path}")
