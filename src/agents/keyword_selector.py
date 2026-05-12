@@ -57,18 +57,21 @@ QA_RATE_CONSECUTIVE_FAIL_PENALTY = -100.0
 QA_RATE_LOOKBACK_DAYS = 30
 
 
-PROMPT = """You are a content scheduler for a {game_name} ({game_abbr}, released {release_date}) guide site.
+PROMPT = """You are a content scheduler for a MULTI-GAME gacha guide site.
 
 Pool of candidate keywords (status='planned'; already sorted by
-priority_with_bonus, which includes a +20 bump for `gsc_longtail` and a
-historical-QA-pass-rate adjustment per article_type):
+priority_with_bonus, which includes a +20 bump for `gsc_longtail`, a
+historical-QA-pass-rate adjustment per article_type, AND a game-priority
+adjustment per `game_priorities` config):
 {candidates}
 
 Historical track record by article_type (last {lookback_days} days):
 {track_record}
 
-Blacklisted article types — DO NOT assign these (NTE is too new and
-public information is too sparse, so the writer fabricates):
+Cross-game priority targets (the site's intended content mix):
+{game_priorities_section}
+
+Blacklisted article types — DO NOT assign these for the indicated game:
 {type_blacklist}
 
 Allowed article_types: {allowed_types}.
@@ -92,11 +95,32 @@ Reply ONLY with JSON in this exact shape (no markdown fence):
 {{
   "keyword_id": "<uuid>",
   "keyword_text": "<the chosen keyword>",
-  "suggested_article_type": "<one of allowed; MUST NOT be in blacklist>",
+  "suggested_article_type": "<one of allowed; MUST NOT be in this game's blacklist>",
   "article_type": "<same as suggested_article_type for backward compat>",
+  "game": "<short_name like wuwa | zzz | hsr | genshin | nte — copy from the candidate's `game` field>",
   "reason": "<one short sentence explaining the pick>"
 }}
 """
+
+
+# Encodes how we tag a keyword with its game in `keywords.notes`.
+# The notes column is text; we prefix with `game=<slug>|`. Stable, easy
+# to parse, easy to migrate if a real `keywords.game` column ever lands.
+_GAME_NOTE_RE = __import__("re").compile(r"\bgame=([a-z_]+)\b")
+
+
+def _game_from_notes(notes: str | None) -> str | None:
+    """Extract game slug from a keywords.notes string."""
+    if not notes:
+        return None
+    m = _GAME_NOTE_RE.search(notes)
+    return m.group(1) if m else None
+
+
+# Tiny adjustment per-game so the LLM sees a higher priority on
+# "primary" games and a lower one on the demoted NTE. Linear scaling:
+# priority_with_bonus += GAME_PRIORITY_WEIGHT * priority_fraction.
+GAME_PRIORITY_WEIGHT = 40.0
 
 
 def _qa_pass_rate_table(
@@ -202,6 +226,18 @@ class KeywordSelectorAgent(BaseAgent):
         # the operator can flip it from the dashboard without a deploy.
         content_plan = self.site_config.get("content_plan") or {}
         type_blacklist: list[str] = list(content_plan.get("type_blacklist") or [])
+        # Cross-game priority dict: {game_slug: weight 0..1}.
+        # If missing → single-game site, all weights treated as 1.0.
+        game_priorities: dict[str, float] = dict(
+            self.site_config.get("game_priorities") or {}
+        )
+        # Per-game blacklist overrides the flat blacklist when present.
+        per_game_blacklist: dict[str, list[str]] = dict(
+            self.site_config.get("type_blacklist_per_game") or {}
+        )
+        game_metadata: dict[str, dict] = dict(
+            self.site_config.get("game_metadata") or {}
+        )
 
         with get_db_connection() as conn, conn.cursor() as cur:
             # Compute the per-type pass-rate signal once
@@ -215,7 +251,7 @@ class KeywordSelectorAgent(BaseAgent):
 
             cur.execute(
                 """
-                select id, keyword, intent, priority_score, source
+                select id, keyword, intent, priority_score, source, notes
                   from keywords
                  where site_id = %s
                    and status = 'planned'
@@ -264,33 +300,42 @@ class KeywordSelectorAgent(BaseAgent):
                 return None
 
             candidates: list[dict[str, Any]] = []
-            for kid, kw, intent, pri, src in cand_rows:
+            for kid, kw, intent, pri, src, notes in cand_rows:
+                game_slug = _game_from_notes(notes)
+                # Per-game blacklist (preferred) else fall back to the flat one.
+                effective_blacklist = (
+                    per_game_blacklist.get(game_slug, type_blacklist)
+                    if game_slug else type_blacklist
+                )
                 guessed_type = _guess_type(kw, intent)
-                # If the guessed type is blacklisted, skip this candidate
-                # outright so the LLM doesn't even see it.
-                if guessed_type and guessed_type in type_blacklist:
+                if guessed_type and guessed_type in effective_blacklist:
                     continue
                 base = float(pri) if pri is not None else 0.0
                 gsc_bonus = GSC_LONGTAIL_BONUS if src == "gsc_longtail" else 0.0
                 type_bonus, type_label = type_adj.get(
                     guessed_type or "_unknown_", (0.0, "no_type_guess")
                 )
+                game_weight = float(game_priorities.get(game_slug, 0.0)) if game_slug else 0.0
+                game_bonus = round(game_weight * GAME_PRIORITY_WEIGHT, 2)
                 candidates.append({
                     "keyword_id": str(kid),
                     "keyword": kw,
                     "intent": intent,
                     "source": src or "manual",
+                    "game": game_slug or "unknown",
                     "guessed_type": guessed_type,
                     "priority": base,
                     "type_adjustment": type_bonus,
                     "type_adjustment_reason": type_label,
+                    "game_bonus": game_bonus,
+                    "game_weight": game_weight,
                     "priority_with_bonus": round(
-                        base + gsc_bonus + type_bonus, 2
+                        base + gsc_bonus + type_bonus + game_bonus, 2
                     ),
                 })
             if not candidates:
                 raise RuntimeError(
-                    f"All candidates filtered out by type_blacklist={type_blacklist}"
+                    f"All candidates filtered out by blacklist={type_blacklist}"
                 )
             candidates.sort(key=lambda c: c["priority_with_bonus"], reverse=True)
             candidates = candidates[:cap]
@@ -312,13 +357,27 @@ class KeywordSelectorAgent(BaseAgent):
             else:
                 tr_lines.append(f"  - {t:14s} pass=0 fail=0  → priority_adj=0 (no data)")
 
+        # Game-priorities + per-game blacklist sections for the prompt
+        if game_priorities:
+            gp_lines = [
+                f"  - {slug}: {weight*100:.0f}% "
+                f"(blacklist: {per_game_blacklist.get(slug) or 'none'}) "
+                f"display: {game_metadata.get(slug, {}).get('display_name', slug)}"
+                for slug, weight in sorted(
+                    game_priorities.items(), key=lambda x: -x[1]
+                )
+            ]
+            game_priorities_section = "\n".join(gp_lines)
+        else:
+            game_priorities_section = "  (single-game site; no cross-game balancing)"
+
         prompt = PROMPT.format(
-            game_name=self.site_config.get("game", {}).get("name", "the game"),
-            game_abbr=self.site_config.get("game", {}).get("abbreviation", ""),
-            release_date=self.site_config.get("game", {}).get("release_date", "recently"),
             candidates=json.dumps(candidates, indent=2, ensure_ascii=False),
             track_record="\n".join(tr_lines),
-            type_blacklist=json.dumps(type_blacklist),
+            type_blacklist=json.dumps(
+                per_game_blacklist or {"_default": type_blacklist}
+            ),
+            game_priorities_section=game_priorities_section,
             lookback_days=QA_RATE_LOOKBACK_DAYS,
             allowed_types=", ".join(t for t in ALL_TYPES if t not in type_blacklist),
         )
@@ -342,25 +401,49 @@ class KeywordSelectorAgent(BaseAgent):
         )
         if not atype:
             raise ValueError(f"LLM did not return article_type: {choice}")
-        if atype in type_blacklist:
-            raise ValueError(
-                f"LLM picked blacklisted article_type={atype!r}; blacklist={type_blacklist}"
-            )
         if atype not in ALL_TYPES:
             raise ValueError(
                 f"LLM picked unknown article_type={atype!r}; allowed={ALL_TYPES}"
             )
 
+        # Look up the chosen keyword's game from the candidate list so
+        # we can apply the right per-game blacklist (the LLM may or may
+        # not echo `game` correctly; trust the DB-derived value).
+        chosen = next(
+            (c for c in candidates if c["keyword_id"] == choice.get("keyword_id")),
+            None,
+        )
+        game_slug = (
+            (chosen or {}).get("game")
+            or choice.get("game")
+            or "unknown"
+        )
+        # Defense in depth: even if the LLM ignored the per-game blacklist,
+        # we re-check the chosen type against the right blacklist.
+        effective_blacklist = (
+            per_game_blacklist.get(game_slug, type_blacklist)
+            if game_slug != "unknown" else type_blacklist
+        )
+        if atype in effective_blacklist:
+            raise ValueError(
+                f"LLM picked blacklisted article_type={atype!r} "
+                f"for game={game_slug!r}; blacklist={effective_blacklist}"
+            )
+
         # Normalize output shape: both keys present so callers can use
-        # either; older orchestrator reads `article_type`.
+        # either; older orchestrator reads `article_type`. `game` is
+        # always set so downstream agents can pick the right wiki sources.
         choice["article_type"] = atype
         choice["suggested_article_type"] = atype
+        choice["game"] = game_slug
 
         # Annotate selector output with full track-record snapshot so
         # post-hoc audits can see what the LLM was looking at.
         choice["_diversity_snapshot"] = {
             "track_record": track_record,
-            "type_blacklist": type_blacklist,
+            "type_blacklist_effective": effective_blacklist,
+            "game_chosen": game_slug,
+            "game_priorities": game_priorities,
             "type_adjustments": {k: {"delta": v[0], "label": v[1]} for k, v in type_adj.items()},
         }
         return choice

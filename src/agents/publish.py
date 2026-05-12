@@ -154,10 +154,19 @@ class PublishAgent(BaseAgent):
         rel_without_collection = rel.split("/", 1)[1] if "/" in rel else rel
         entry_slug = rel_without_collection[:-len(".md")] if rel_without_collection.endswith(".md") else rel_without_collection
 
+        # Carry the article's `game` from outline jsonb into frontmatter
+        # so Astro can filter / route by game without a schema change.
+        outline_blob = article.get("outline") or {}
+        game_slug = (
+            (outline_blob.get("game") if isinstance(outline_blob, dict) else None)
+            or "nte"   # safe default for any pre-multi-game article
+        )
+
         # Build frontmatter
         fm: dict[str, Any] = {
             "title": article["title"] or slug,
             "slug": entry_slug,
+            "game": game_slug,
             "article_type": article_type,
             "qa_score": float(article["qa_score"] or 0),
             "word_count": int(article["word_count"] or 0),

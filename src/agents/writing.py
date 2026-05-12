@@ -12,6 +12,8 @@ from src.agents.base import BaseAgent
 FACTUAL_RULES = """
 CRITICAL FACTUAL ACCURACY RULES:
 1. This article is about {game_name} ({game_abbr}), released on {release_date}.
+   Preferred wiki / community sources for this specific game:
+{wiki_sources_block}
 2. You MUST use Google Search to find current, accurate information about
    characters, weapons, banners, and game mechanics in {game_name}.
 3. DO NOT invent character names, weapon names, or game mechanics. If your
@@ -102,11 +104,40 @@ class WritingAgent(BaseAgent):
         max_words = int(input_data.get("max_word_count", 2500))
         feedback = input_data.get("qa_feedback")
 
-        game = self.site_config.get("game", {})
+        # Resolve game metadata: prefer the per-article game (set by the
+        # orchestrator via input_data['game']), falling back to the
+        # legacy single-game `site_config.game` for non-multi-game sites.
+        game_slug = input_data.get("game") or "unknown"
+        game_meta_by_slug = self.site_config.get("game_metadata") or {}
+        per_game = game_meta_by_slug.get(game_slug) or {}
+        legacy_game = self.site_config.get("game") or {}
+
+        game_name = (
+            per_game.get("display_name")
+            or legacy_game.get("name")
+            or "the game"
+        )
+        game_abbr = (
+            per_game.get("short_name")
+            or legacy_game.get("abbreviation")
+            or game_slug
+        )
+        release_date = (
+            per_game.get("release_date")
+            or legacy_game.get("release_date")
+            or "recently"
+        )
+        wiki_sources = per_game.get("wiki_sources") or []
+        wiki_sources_block = (
+            "\n".join(f"   - {s}" for s in wiki_sources)
+            if wiki_sources
+            else "   (general gaming sites: IGN, GameSpot, Game8, Reddit)"
+        )
         rules = FACTUAL_RULES.format(
-            game_name=game.get("name", "the game"),
-            game_abbr=game.get("abbreviation", ""),
-            release_date=game.get("release_date", "recently"),
+            game_name=game_name,
+            game_abbr=game_abbr,
+            release_date=release_date,
+            wiki_sources_block=wiki_sources_block,
             today_iso=_date.today().isoformat(),
         )
 
@@ -129,7 +160,7 @@ class WritingAgent(BaseAgent):
             )
 
         prompt = PROMPT.format(
-            game_name=game.get("name", "the game"),
+            game_name=game_name,
             factual_rules=rules,
             keyword=keyword,
             article_type=article_type,

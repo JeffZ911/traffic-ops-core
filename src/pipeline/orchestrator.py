@@ -274,15 +274,17 @@ def run_one_article(
     keyword_id = UUID(sel["keyword_id"])
     keyword = sel["keyword_text"]
     article_type = sel["article_type"]
+    game = sel.get("game") or "unknown"
     if force_article_type and force_article_type != article_type:
         log(f"  Overriding article_type {article_type!r} → {force_article_type!r} "
             f"(force_article_type set by caller)")
         article_type = force_article_type
-    log(f"  Selected: {keyword!r} → {article_type}  (reason: {sel.get('reason')})")
+    log(f"  Selected: {keyword!r} → {article_type}  game={game}  (reason: {sel.get('reason')})")
     summary["stages"].append({"agent": "keyword_selector", **sel})
     summary["keyword_id"] = str(keyword_id)
     summary["keyword"] = keyword
     summary["article_type"] = article_type
+    summary["game"] = game
 
     _set_keyword_status(keyword_id, "in_progress")
 
@@ -311,8 +313,13 @@ def run_one_article(
             input_data={
                 "keyword": keyword, "article_type": article_type,
                 "target_word_count": target_words,
+                "game": game,
             },
         )
+        # Tag the outline jsonb with the game so PublishAgent can write
+        # `game:` into the markdown frontmatter, and so future audits
+        # can look at articles.outline->>'game' without a schema change.
+        outline["game"] = game
         log(f"  Title: {outline.get('title')}")
         log(f"  Slug:  {outline.get('slug')}")
         log(f"  Sections: {[s.get('h2') for s in outline.get('sections', [])]}")
@@ -351,7 +358,7 @@ def run_one_article(
                 site_id=site_id, article_id=article_id,
                 input_data={
                     "keyword": keyword, "article_type": article_type,
-                    "outline": outline,
+                    "outline": outline, "game": game,
                     "min_word_count": min_words, "max_word_count": max_words,
                     "qa_feedback": feedback,
                 },
@@ -374,7 +381,7 @@ def run_one_article(
                 input_data={
                     "keyword": keyword, "article_type": article_type,
                     "content_md": write_output["content_md"],
-                    "outline": outline, "word_count": wc,
+                    "outline": outline, "game": game, "word_count": wc,
                     "min_word_count": min_words, "max_word_count": max_words,
                 },
             )
