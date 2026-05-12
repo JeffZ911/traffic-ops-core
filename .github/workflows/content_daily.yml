@@ -253,7 +253,26 @@ jobs:
           npx --yes wrangler@latest pages deploy dist \
             --project-name ntecodex --branch main --commit-dirty=true
 
-      # ---------------------------------------------------------------- 7.
+      # ---------------------------------------------------------------- 8.
+      # Zero-published streak check. If three days in a row produce no
+      # `status='published'` article, fire a warning email so the
+      # operator can investigate before a week of silent failure piles
+      # up. continue-on-error so a DB / SMTP hiccup here never blocks
+      # the deploy itself (which is already succeeded above).
+      - name: Zero-published streak check (3-day window)
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+        run: python -m scripts.check_publish_streak --days 3
+
+      # ---------------------------------------------------------------- 9.
       - name: Notify on failure
         if: failure()
         env:
