@@ -7,10 +7,29 @@ independently verifies proper nouns the writer claimed.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from src.agents._json_extract import extract_json
 from src.agents.base import BaseAgent
+
+
+# Matches the writer's sanctioned "I cannot verify this" placeholder.
+# Tolerant: the date suffix is optional / variable, and the QA LLM may
+# echo back a slightly different casing or trim.
+_HONESTY_PLACEHOLDER_RE = re.compile(
+    r"\[?\s*information not yet publicly available"
+    r"(?:\s+as of[^\]]*?)?\s*\]?",
+    re.IGNORECASE,
+)
+
+
+def _is_honesty_placeholder(term: str) -> bool:
+    """Return True when a fabricated_terms entry is actually the
+    sanctioned honesty placeholder rather than a real fabrication."""
+    if not isinstance(term, str):
+        return False
+    return bool(_HONESTY_PLACEHOLDER_RE.search(term))
 
 
 FACTUAL_RULES = """
@@ -24,6 +43,22 @@ CRITICAL FACT-CHECK RULES:
 5. Even one fabricated proper noun => factual_accuracy = 0 and passed = false.
    Multiple confirmed real names but with fabricated mechanics => max 1.0.
 6. Prefer official sources, IGN, GameSpot, Polygon, Game8, Game Rant, Reddit.
+
+HONESTY PLACEHOLDER RULE (added 2026-05-11):
+   The writer is INSTRUCTED to write the literal phrase
+   "[Information not yet publicly available as of YYYY-MM-DD]" when a
+   specific fact (number, mechanic, banner name) cannot be verified via
+   search. This is the CORRECT behavior — not a fabrication.
+
+   - DO NOT add the placeholder string itself to `fabricated_terms`.
+   - DO NOT lower factual_accuracy for the presence of placeholders.
+   - You MAY (and should) lower `info_density` if the article has too
+     many placeholders for it to be a useful guide — that's the right
+     scoring channel for "honest but thin" content.
+   - If you find a placeholder where the information IS actually
+     publicly available (you can verify it via search), that's a
+     writer failure: list it under `issues` as a missed-research
+     instance but still don't treat the placeholder as fabricated.
 """
 
 
@@ -135,8 +170,25 @@ class QAAgent(BaseAgent):
             raw_12 = float(result.get("score_raw_12", 0) or 0)
         score = round(raw_12 / 1.2, 2)
 
+        # Post-hoc filter: even with the explicit HONESTY PLACEHOLDER
+        # RULE in the prompt, the QA LLM occasionally lists the literal
+        # honesty placeholder string as a fabricated_term. That's a
+        # category error the writer shouldn't be punished for — the
+        # placeholder is the SANCTIONED way to admit a knowledge gap.
+        # Strip it out before applying the hard rule below.
+        fabricated_raw = feedback.get("fabricated_terms") or []
+        fabricated = [
+            t for t in fabricated_raw
+            if not _is_honesty_placeholder(t)
+        ]
+        stripped = [t for t in fabricated_raw if _is_honesty_placeholder(t)]
+        if stripped:
+            # Keep an audit trail in the feedback dict so we can tell
+            # post-hoc that the LLM did flag the placeholder.
+            feedback["fabricated_terms"] = fabricated
+            feedback["_honesty_placeholder_stripped"] = stripped
+
         # Hard rule: any fabricated_terms => fail regardless of score
-        fabricated = feedback.get("fabricated_terms") or []
         passed = (score >= pass_threshold) and not fabricated
 
         return {
