@@ -10,8 +10,12 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
+from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID, uuid4
+
+import psycopg
 
 from src.agents.keyword_selector import KeywordSelectorAgent
 from src.agents.outline import OutlineAgent
@@ -31,6 +35,75 @@ def _slugify(text: str, max_len: int = 60) -> str:
     return s[:max_len] or "article"
 
 
+# Maximum collision-retry rounds. Attempt 0 uses the raw slug;
+# attempt 1 appends a date suffix; attempts 2-3 append date + random.
+SLUG_COLLISION_MAX_RETRIES = 3
+
+
+def _date_suffix() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%d")
+
+
+def _random_suffix(n: int = 4) -> str:
+    # 4 chars of base32-ish — short, URL-safe, plenty of collision room
+    return secrets.token_hex(n // 2 + 1)[:n]
+
+
+def _candidate_slug(base: str, attempt: int) -> str:
+    """Return the slug to try on a given retry round.
+
+    Attempt 0 → base
+    Attempt 1 → base-YYYYMMDD
+    Attempt 2 → base-YYYYMMDD-aaaa
+    Attempt 3 → base-YYYYMMDD-aaaa-bbbb   (extra random chunk)
+    """
+    if attempt == 0:
+        return base
+    suffix = "-" + _date_suffix()
+    if attempt >= 2:
+        suffix += "-" + _random_suffix()
+    if attempt >= 3:
+        suffix += "-" + _random_suffix()
+    # Re-clamp length: total can't exceed _slugify's max_len + suffix budget
+    return (base + suffix)[:80]
+
+
+def _record_slug_rename(
+    site_id: UUID,
+    article_id: Optional[UUID],
+    intended: str,
+    final: str,
+    attempts: int,
+) -> None:
+    """Log a slug auto-rename to `alerts` so the operator can audit."""
+    try:
+        with get_db_connection(autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into alerts
+                  (site_id, level, source, message, payload)
+                values (%s, 'info', 'orchestrator',
+                        %s, %s::jsonb)
+                """,
+                (
+                    str(site_id),
+                    f"slug auto-renamed from {intended!r} to {final!r} "
+                    f"after {attempts} collision(s)",
+                    json.dumps({
+                        "article_id": str(article_id) if article_id else None,
+                        "intended_slug": intended,
+                        "final_slug": final,
+                        "attempts": attempts,
+                    }),
+                ),
+            )
+    except Exception:
+        # `alerts` table may have a different shape on older deployments,
+        # or RLS may bite. Never block a successful pipeline on a logging
+        # failure — the rename itself already succeeded.
+        pass
+
+
 def _load_site(site_id: UUID) -> dict[str, Any]:
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute("select config from sites where id = %s", (str(site_id),))
@@ -42,35 +115,107 @@ def _load_site(site_id: UUID) -> dict[str, Any]:
 
 def _create_article(
     site_id: UUID, slug: str, title: str, article_type: str
-) -> UUID:
-    article_id = uuid4()
-    with get_db_connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            insert into articles (id, site_id, slug, title, article_type, status)
-            values (%s, %s, %s, %s, %s, 'draft')
-            """,
-            (str(article_id), str(site_id), slug, title, article_type),
-        )
-    return article_id
+) -> tuple[UUID, str]:
+    """INSERT a new articles row. On UniqueViolation on (site_id, slug),
+    retry with progressively-disambiguated slugs (date, random suffixes)
+    up to SLUG_COLLISION_MAX_RETRIES times.
+
+    Returns (article_id, final_slug). final_slug may differ from the
+    input slug if collisions occurred; the orchestrator's `summary` and
+    later `_set_article` calls must use the returned slug.
+    """
+    intended = slug
+    last_exc: Exception | None = None
+    for attempt in range(SLUG_COLLISION_MAX_RETRIES + 1):
+        article_id = uuid4()
+        candidate = _candidate_slug(intended, attempt)
+        try:
+            with get_db_connection() as conn, conn.cursor() as cur:
+                cur.execute(
+                    """
+                    insert into articles (id, site_id, slug, title, article_type, status)
+                    values (%s, %s, %s, %s, %s, 'draft')
+                    """,
+                    (str(article_id), str(site_id), candidate, title, article_type),
+                )
+            if attempt > 0:
+                _record_slug_rename(site_id, article_id, intended, candidate, attempt)
+            return article_id, candidate
+        except psycopg.errors.UniqueViolation as e:
+            last_exc = e
+            continue
+    raise RuntimeError(
+        f"slug collision retries exhausted for {intended!r}: {last_exc}"
+    )
 
 
-def _set_article(article_id: UUID, **fields: Any) -> None:
+def _set_article(article_id: UUID, **fields: Any) -> dict[str, Any]:
+    """UPDATE an articles row. When `slug` is among the fields, the
+    UNIQUE(site_id, slug) constraint can fire; we retry with date /
+    random suffixes the same way _create_article does.
+
+    Returns a small audit dict: {"final_slug": <slug-that-stuck-or-None>}.
+    Callers that pass a slug should treat the return value's
+    final_slug as authoritative (it may differ from what they passed).
+    """
     if not fields:
-        return
-    set_clauses = []
-    params: list[Any] = []
-    for k, v in fields.items():
-        if k in ("outline", "qa_feedback") and v is not None:
-            set_clauses.append(f"{k} = %s::jsonb")
-            params.append(json.dumps(v))
-        else:
-            set_clauses.append(f"{k} = %s")
-            params.append(v)
-    params.append(str(article_id))
-    sql = f"update articles set {', '.join(set_clauses)} where id = %s"
-    with get_db_connection() as conn, conn.cursor() as cur:
-        cur.execute(sql, params)
+        return {"final_slug": None}
+
+    intended_slug = fields.get("slug")
+    max_attempts = (
+        SLUG_COLLISION_MAX_RETRIES + 1 if intended_slug else 1
+    )
+    last_exc: Exception | None = None
+    for attempt in range(max_attempts):
+        # Compute the slug for this attempt
+        attempt_fields = dict(fields)
+        if intended_slug:
+            attempt_fields["slug"] = _candidate_slug(intended_slug, attempt)
+
+        set_clauses = []
+        params: list[Any] = []
+        for k, v in attempt_fields.items():
+            if k in ("outline", "qa_feedback") and v is not None:
+                set_clauses.append(f"{k} = %s::jsonb")
+                params.append(json.dumps(v))
+            else:
+                set_clauses.append(f"{k} = %s")
+                params.append(v)
+        params.append(str(article_id))
+        sql = f"update articles set {', '.join(set_clauses)} where id = %s"
+        try:
+            with get_db_connection() as conn, conn.cursor() as cur:
+                cur.execute(sql, params)
+            final_slug = attempt_fields.get("slug")
+            if intended_slug and attempt > 0:
+                # We don't have a site_id here directly; alerts.site_id is
+                # nullable per the schema? If not, we look it up.
+                try:
+                    with get_db_connection() as conn, conn.cursor() as cur:
+                        cur.execute(
+                            "select site_id from articles where id = %s",
+                            (str(article_id),),
+                        )
+                        r = cur.fetchone()
+                        site_id_val = r[0] if r else None
+                except Exception:
+                    site_id_val = None
+                if site_id_val:
+                    _record_slug_rename(
+                        site_id_val, article_id, intended_slug, final_slug, attempt
+                    )
+            return {"final_slug": final_slug}
+        except psycopg.errors.UniqueViolation as e:
+            last_exc = e
+            if not intended_slug:
+                # Collision on a non-slug field? Re-raise immediately —
+                # not our retry case.
+                raise
+            continue
+    raise RuntimeError(
+        f"slug collision retries exhausted on UPDATE for "
+        f"intended slug {intended_slug!r}: {last_exc}"
+    )
 
 
 def _set_keyword_status(keyword_id: UUID, status: str) -> None:
@@ -147,9 +292,12 @@ def run_one_article(
         + site_config["content_plan"]["max_word_count"]
     ) // 2
     initial_slug = _slugify(keyword)
-    article_id = _create_article(
+    article_id, used_slug = _create_article(
         site_id=site_id, slug=initial_slug, title=keyword, article_type=article_type,
     )
+    if used_slug != initial_slug:
+        log(f"  ⚠️  slug collision on {initial_slug!r} — using {used_slug!r}")
+    initial_slug = used_slug
     _link_article_keyword(article_id, keyword_id)
     log(f"  Created articles row id={article_id}  slug={initial_slug}")
     summary["article_id"] = str(article_id)
@@ -169,13 +317,20 @@ def run_one_article(
         log(f"  Slug:  {outline.get('slug')}")
         log(f"  Sections: {[s.get('h2') for s in outline.get('sections', [])]}")
         summary["stages"].append({"agent": "outline", "title": outline.get("title")})
-        _set_article(
+        desired_slug = outline.get("slug") or initial_slug
+        res = _set_article(
             article_id,
             title=outline.get("title") or keyword,
-            slug=outline.get("slug") or initial_slug,
+            slug=desired_slug,
             outline=outline,
             status="writing",
         )
+        final_slug = res.get("final_slug")
+        if final_slug and final_slug != desired_slug:
+            log(f"  ⚠️  slug collision on UPDATE {desired_slug!r} → {final_slug!r}")
+        if final_slug:
+            outline["slug"] = final_slug
+            summary["slug"] = final_slug
 
         # -------------------------------------------------- Step 4: write + QA loop
         max_retry_rounds = int(site_config["qa_thresholds"].get("max_retry_rounds", 3))
