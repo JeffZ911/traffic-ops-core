@@ -36,6 +36,7 @@ from dotenv import load_dotenv
 from src.agents._json_extract import extract_json
 from src.db.client import get_db_connection
 from src.utils.llm import get_llm_provider
+from scripts._keyword_entity_verify import verify_keyword, VerifyResult
 
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -85,6 +86,123 @@ element shaped:
   "notes": "<one short reason / source>"
 }}
 """
+
+
+def _log_verify_rejection(
+    site_id: UUID, keyword: str, reason: str, fabricated_entities: list[str]
+) -> None:
+    """Record a gardener entity-verify rejection to `alerts` so the
+    operator can audit which generated keywords were dropped and why.
+    Failure to log is swallowed — never block the gardener on it."""
+    try:
+        with get_db_connection(autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into alerts (site_id, level, source, message, payload)
+                values (%s, 'info', 'keyword_gardener', %s, %s::jsonb)
+                """,
+                (
+                    str(site_id),
+                    f"entity-verify dropped keyword {keyword!r}",
+                    json.dumps({
+                        "keyword": keyword,
+                        "fabricated_entities": fabricated_entities,
+                        "reason": reason,
+                    }),
+                ),
+            )
+    except Exception:
+        pass
+
+
+def _gate_keywords_by_entity_verify(
+    provider, model: str, items: list[dict[str, Any]],
+    site_id: UUID, budget_usd: float, log=print,
+) -> tuple[list[dict[str, Any]], float, int]:
+    """Run entity-verify on each candidate keyword. Items whose verdict
+    is 'archive' are dropped (and alert-logged). Items whose verdict is
+    'keep' (real / general / mixed-real) flow through.
+
+    `entity_status='general'` (no proper nouns detected) skips the LLM
+    call entirely to save cost — those keywords aren't at fabrication
+    risk by definition.
+
+    A simple lowercase-detection heuristic decides which keywords need
+    LLM verify: anything with a 4+ character token that isn't a known
+    category word goes to LLM. The conservative bias is intentional:
+    extra verify calls cost $0.005 each; a single fabricated keyword
+    that gets through can cost $0.40+ downstream when WritingAgent
+    hallucinates content for it.
+
+    Returns (kept_items, cumulative_cost, n_rejected).
+    """
+    kept: list[dict[str, Any]] = []
+    rejected = 0
+    cost = 0.0
+    for item in items:
+        if cost >= budget_usd:
+            log(f"   ⛔ verify-gate budget cap ${budget_usd:.2f} reached; "
+                f"passing remaining {len(items) - len(kept) - rejected} items through unverified")
+            kept.extend(items[len(kept) + rejected:])
+            break
+        kw = (item.get("keyword") or "").strip()
+        if not kw:
+            continue
+
+        # Cheap pre-filter: if the keyword has zero tokens outside our
+        # category-word allowlist, skip verify (it's a pure category
+        # query like "best dps build nte").
+        if not _needs_entity_verify(kw):
+            kept.append(item)
+            continue
+
+        res: VerifyResult = verify_keyword(provider, model, kw)
+        cost += res.cost_usd
+        if res.verdict == "archive":
+            rejected += 1
+            log(f"   ❌ verify-gate drop: {kw!r} "
+                f"(fab: {res.fabricated_entities or '?'})")
+            _log_verify_rejection(
+                site_id, kw, res.reason, res.fabricated_entities,
+            )
+            continue
+        kept.append(item)
+    return kept, cost, rejected
+
+
+# Tokens that count as "general categories" — not entity names.
+# Anything in the keyword that ONLY contains these (plus stop-words)
+# bypasses LLM verify.
+CATEGORY_TOKENS = {
+    # site / game / language scaffolding
+    "nte", "neverness", "everness", "guide", "build", "tier", "list",
+    "best", "for", "and", "or", "vs", "with", "without", "how", "to",
+    "what", "when", "where", "who", "why", "the", "in", "on", "of",
+    # gameplay categories
+    "dps", "sub", "support", "healer", "tank", "beginner", "advanced",
+    "tips", "tricks", "endgame", "early", "late", "f2p", "p2w",
+    "reroll", "team", "teams", "comp", "comps", "synergy",
+    "weapon", "weapons", "disk", "disks", "set", "sets", "skill", "skills",
+    "energy", "stamina", "boss", "bosses", "guardian", "lord", "king",
+    "chamber", "spiral", "abyss", "anomaly", "anomalies",
+    "character", "characters", "4", "5", "star", "tier-list",
+    # frequency / time
+    "daily", "weekly", "monthly", "2026", "patch", "update", "release",
+    "method", "fast", "fastest", "ios", "android", "pc",
+    "rotation", "priority", "ranking", "rankings", "list",
+}
+
+
+def _needs_entity_verify(keyword: str) -> bool:
+    """Return True if the keyword has at least one non-category token
+    long enough to be a candidate entity name (4+ chars)."""
+    import re
+    tokens = re.findall(r"[a-z0-9]+", (keyword or "").lower())
+    suspicious = [
+        t for t in tokens
+        if len(t) >= 4 and t not in CATEGORY_TOKENS
+    ]
+    return bool(suspicious)
 
 
 def _existing_keywords(cur, site_id: UUID, sample_n: int = 60) -> set[str]:
@@ -223,10 +341,26 @@ def auto_balance_types(
             if not isinstance(data, list):
                 continue
 
+        # Entity-verify gate for auto-balance picks too. Same logic as
+        # the top-up path — drop fabricated-entity proposals BEFORE
+        # they enter the pool.
+        candidate_items = [
+            d for d in data
+            if isinstance(d, dict)
+            and (d.get("keyword") or "").strip().lower()
+            and (d.get("keyword") or "").strip().lower() not in existing
+        ]
+        if candidate_items:
+            candidate_items, vcost, vrej = _gate_keywords_by_entity_verify(
+                provider, model, candidate_items, site_id,
+                budget_usd=max(budget_usd * 0.5, 0.20),
+            )
+            cumulative_cost += vcost
+            if vrej:
+                print(f"   🔬 {atype}: verify dropped {vrej}")
+
         inserted_for_type = 0
-        for item in data:
-            if not isinstance(item, dict):
-                continue
+        for item in candidate_items:
             kw = (item.get("keyword") or "").strip().lower()
             if not kw or kw in existing:
                 continue
@@ -391,6 +525,21 @@ def main() -> int:
 
     if not fresh:
         print(f"   nothing to insert (all {skipped} candidates were duplicates / empty)")
+        return 0
+
+    # Entity-verify gate (P0 二次修复 2026-05-11): drop fabricated-entity
+    # keywords BEFORE they enter the pool. Costs ~$0.005 per non-category
+    # keyword. Skipped entirely for keywords that are pure-category
+    # queries (no candidate proper nouns).
+    print(f"   🔬 entity-verify gate on {len(fresh)} candidate(s)")
+    verify_budget = max(args.budget_usd * 0.5, 0.30)
+    fresh, verify_cost, verify_rejected = _gate_keywords_by_entity_verify(
+        provider, model, fresh, site_id, verify_budget, log=print,
+    )
+    print(f"   🔬 verify: kept {len(fresh)}, dropped {verify_rejected}, "
+          f"cost ${verify_cost:.4f}")
+    if not fresh:
+        print(f"   ✓ nothing left after verify; nothing inserted")
         return 0
 
     inserted = 0
