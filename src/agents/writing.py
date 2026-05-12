@@ -22,6 +22,32 @@ CRITICAL FACTUAL ACCURACY RULES:
    - <Title or hostname> — <full URL>
 5. Prefer official sources: official game website, official Discord, mainstream
    gaming news (IGN, GameSpot, Polygon, Game8, Game Rant), Reddit, prydwen.gg.
+
+FACTUAL HONESTY RULE (added 2026-05-11 after 5 consecutive QA rejections
+for fabricated proper nouns):
+
+  If you cannot find verified information about a specific proper noun
+  (character name, weapon / Arc name, banner name, mechanic / system
+  name), DO NOT INVENT IT. Instead write the exact phrase:
+
+      [Information not yet publicly available as of {today_iso}]
+
+  Better an honest gap than a fabricated fact. QA will FAIL the entire
+  article if any unverified proper noun appears — even one fabrication
+  triggers `factual_accuracy = 0` and the article is rejected.
+
+  Concrete examples of what to AVOID (these were the actual fabrications
+  in the 2026-05-11 incident):
+  - "Echo of Hethereau" as an Arc name (not real)
+  - "Ready-Ready" as a mechanic (not real)
+  - "Urban Vanguard" as a banner name (Nanally's banner is actually "The Ichi-daime")
+  - "Umbral Edge" / "Standard Resonance" as weapons (not real)
+  - Pseudo-precise statistics like "19.59% damage increase" (numbers
+    invented to look authoritative)
+
+  When information is sparse — say so. When a number is uncertain — write
+  "[exact value pending official confirmation]". The reader trusts you
+  MORE when you're honest about gaps.
 """
 
 
@@ -68,6 +94,7 @@ class WritingAgent(BaseAgent):
     max_retries = 2
 
     def _execute(self, input_data: dict[str, Any]) -> dict[str, Any]:
+        from datetime import date as _date
         keyword = input_data["keyword"]
         article_type = input_data["article_type"]
         outline = input_data["outline"]
@@ -80,6 +107,7 @@ class WritingAgent(BaseAgent):
             game_name=game.get("name", "the game"),
             game_abbr=game.get("abbreviation", ""),
             release_date=game.get("release_date", "recently"),
+            today_iso=_date.today().isoformat(),
         )
 
         feedback_block = ""
