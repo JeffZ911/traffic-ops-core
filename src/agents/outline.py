@@ -150,17 +150,40 @@ class OutlineAgent(BaseAgent):
         article_type = input_data["article_type"]
         target_words = int(input_data.get("target_word_count", 1500))
 
-        game = self.site_config.get("game", {})
+        # Multi-game (Phase 2.3+): prefer per-article game metadata
+        # from input_data['game'], falling back to legacy
+        # site_config.game for single-game sites. Without this, every
+        # multi-game article gets NTE-themed outlines because the
+        # legacy config still says game.name='Neverness to Everness'.
+        game_slug = input_data.get("game") or "unknown"
+        game_meta_by_slug = self.site_config.get("game_metadata") or {}
+        per_game = game_meta_by_slug.get(game_slug) or {}
+        legacy_game = self.site_config.get("game") or {}
+        game_name = (
+            per_game.get("display_name")
+            or legacy_game.get("name")
+            or "the game"
+        )
+        game_abbr = (
+            per_game.get("short_name")
+            or legacy_game.get("abbreviation")
+            or game_slug
+        )
+        release_date = (
+            per_game.get("release_date")
+            or legacy_game.get("release_date")
+            or "recently"
+        )
         rules = FACTUAL_RULES.format(
-            game_name=game.get("name", "the game"),
-            game_abbr=game.get("abbreviation", ""),
-            release_date=game.get("release_date", "recently"),
-            game_subreddit=game.get("name", "").replace(" ", ""),
+            game_name=game_name,
+            game_abbr=game_abbr,
+            release_date=release_date,
+            game_subreddit=game_name.replace(" ", "").replace(":", ""),
         )
 
         if article_type == "character_db":
             prompt = CHARACTER_DB_PROMPT.format(
-                game_name=game.get("name", "the game"),
+                game_name=game_name,
                 factual_rules=rules,
                 keyword=keyword,
                 target_words=target_words,
@@ -168,7 +191,7 @@ class OutlineAgent(BaseAgent):
         else:
             sections = TYPE_SECTIONS.get(article_type, ["Overview", "Details", "FAQ"])
             prompt = GENERIC_PROMPT.format(
-                game_name=game.get("name", "the game"),
+                game_name=game_name,
                 factual_rules=rules,
                 keyword=keyword,
                 article_type=article_type,
