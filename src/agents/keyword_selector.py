@@ -46,15 +46,34 @@ ALL_TYPES: tuple[str, ...] = (
 
 GSC_LONGTAIL_BONUS = 20.0
 
-# QA-pass-rate weighting thresholds. Conservative: we only reward types
-# with a real track record and only penalize when failure mode is clear.
-QA_RATE_REWARD_THRESHOLD = 0.60
-QA_RATE_PENALTY_THRESHOLD = 0.30
+# QA-pass-rate weighting thresholds (Phase 2.4 — 2026-05-12).
+# Aggressive 4-band scheme to push the cron toward consistently-passing
+# article types when daily volume goes from 1→24 attempts. At 24/day a
+# 10% pass-rate type wastes ~$3.50/day on guaranteed-fail attempts;
+# the −80 penalty makes it essentially invisible to the LLM. Consec-fail
+# escape valve fires hardest (−150) so a sudden regression in a
+# previously-good type bails out fast.
+#
+#     pass_rate band   | adjustment
+#     ≥ 70%            | +50    (strong reward — push toward winners)
+#     50 – 70%         | +20    (small reward)
+#     30 – 50%         |   0    (neutral)
+#     < 30%            | −80    (strong penalty)
+#     3 consec fails   | −150   (override; force-avoid regression)
+#     samples < 3      |   0    (insufficient evidence)
+QA_RATE_HIGH_REWARD_THRESHOLD = 0.70   # ≥ 70%
+QA_RATE_MID_REWARD_THRESHOLD = 0.50    # 50-70%
+QA_RATE_PENALTY_THRESHOLD = 0.30       # < 30%
 QA_RATE_MIN_SAMPLES = 3
-QA_RATE_REWARD = 30.0
-QA_RATE_PENALTY = -50.0
-QA_RATE_CONSECUTIVE_FAIL_PENALTY = -100.0
+QA_RATE_HIGH_REWARD = 50.0
+QA_RATE_MID_REWARD = 20.0
+QA_RATE_PENALTY = -80.0
+QA_RATE_CONSECUTIVE_FAIL_PENALTY = -150.0
 QA_RATE_LOOKBACK_DAYS = 30
+
+# Kept as aliases so existing tests still import them.
+QA_RATE_REWARD_THRESHOLD = QA_RATE_HIGH_REWARD_THRESHOLD
+QA_RATE_REWARD = QA_RATE_HIGH_REWARD
 
 
 PROMPT = """You are a content scheduler for a MULTI-GAME gacha guide site.
@@ -202,8 +221,10 @@ def _type_adjustment(stats: dict[str, Any] | None) -> tuple[float, str]:
 
     if rate is None:
         return 0.0, "no_rate"
-    if rate >= QA_RATE_REWARD_THRESHOLD:
-        return QA_RATE_REWARD, f"pass_rate={rate:.0%}"
+    if rate >= QA_RATE_HIGH_REWARD_THRESHOLD:
+        return QA_RATE_HIGH_REWARD, f"pass_rate={rate:.0%}"
+    if rate >= QA_RATE_MID_REWARD_THRESHOLD:
+        return QA_RATE_MID_REWARD, f"pass_rate={rate:.0%}"
     if rate < QA_RATE_PENALTY_THRESHOLD:
         return QA_RATE_PENALTY, f"pass_rate={rate:.0%}"
     return 0.0, f"pass_rate={rate:.0%}"

@@ -20,6 +20,8 @@ from src.agents.keyword_selector import (
     ALL_TYPES,
     KeywordSelectorAgent,
     QA_RATE_CONSECUTIVE_FAIL_PENALTY,
+    QA_RATE_HIGH_REWARD,
+    QA_RATE_MID_REWARD,
     QA_RATE_MIN_SAMPLES,
     QA_RATE_PENALTY,
     QA_RATE_REWARD,
@@ -48,19 +50,34 @@ def test_type_adjustment_few_samples():
     assert "few_samples" in label
 
 
-def test_type_adjustment_reward_at_60_pct():
+def test_type_adjustment_mid_reward_at_60_pct():
+    """4-band scheme: 60% sits in mid band (50-70%) → +20, not the
+    high-reward +50."""
     stats = {"n_pass": 3, "n_fail": 2, "pass_rate": 0.6, "consecutive_fail": 0}
     delta, _ = _type_adjustment(stats)
-    assert delta == QA_RATE_REWARD
+    assert delta == QA_RATE_MID_REWARD
 
 
-def test_type_adjustment_reward_at_high_rate():
+def test_type_adjustment_high_reward_at_70_pct():
+    stats = {"n_pass": 7, "n_fail": 3, "pass_rate": 0.7, "consecutive_fail": 0}
+    delta, _ = _type_adjustment(stats)
+    assert delta == QA_RATE_HIGH_REWARD
+
+
+def test_type_adjustment_high_reward_at_very_high_rate():
     stats = {"n_pass": 9, "n_fail": 1, "pass_rate": 0.9, "consecutive_fail": 0}
     delta, _ = _type_adjustment(stats)
-    assert delta == QA_RATE_REWARD
+    assert delta == QA_RATE_HIGH_REWARD
+
+
+def test_type_adjustment_legacy_alias_still_works():
+    """QA_RATE_REWARD is kept as alias of QA_RATE_HIGH_REWARD for
+    backward compat with any external caller."""
+    assert QA_RATE_REWARD == QA_RATE_HIGH_REWARD
 
 
 def test_type_adjustment_neutral_mid_band():
+    # 40% is in the 30-50% band → neutral 0
     stats = {"n_pass": 2, "n_fail": 3, "pass_rate": 0.4, "consecutive_fail": 0}
     delta, _ = _type_adjustment(stats)
     assert delta == 0.0

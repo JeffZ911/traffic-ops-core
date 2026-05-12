@@ -1,7 +1,17 @@
 name: Content Daily Pipeline
+# Phase 2.4 (2026-05-12): velocity push — 6 cron/day × 4 articles per
+# cron = 24 attempts/day. With ~65% pass-rate this should publish
+# 15-17 articles/day. Budget guard ($150/month, ~30% safety margin
+# for ~$0.40/article × 17/day × 30 = ~$204 worst case) sits in front
+# of every cost step.
 on:
   schedule:
-    - cron: '0 2 * * *'  # 02:00 UTC = 10:00 Asia/Shanghai
+    - cron: '0 2 * * *'   # 02:00 UTC = 10:00 Asia/Shanghai
+    - cron: '0 6 * * *'   # 06:00 UTC = 14:00 Asia/Shanghai
+    - cron: '0 10 * * *'  # 10:00 UTC = 18:00 Asia/Shanghai
+    - cron: '0 14 * * *'  # 14:00 UTC = 22:00 Asia/Shanghai
+    - cron: '0 18 * * *'  # 18:00 UTC = 02:00 Asia/Shanghai (next day)
+    - cron: '0 22 * * *'  # 22:00 UTC = 06:00 Asia/Shanghai (next day)
   workflow_dispatch:
 
 # Cancel an in-flight run if a newer one starts
@@ -147,14 +157,17 @@ jobs:
           fi
 
       # ---------------------------------------------------------------- 3.
-      - name: Generate one article (orchestrator)
+      # Velocity push (Phase 2.4): 4 articles per cron invocation, 6
+      # cron/day → 24 attempts/day. Per-iteration budget check inside
+      # run_batch_smoke aborts the loop early if we cross 95% mid-batch.
+      - name: Generate articles (batch=4)
         if: steps.budget.outputs.action != 'pause_all'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: python -m scripts.run_one_article_smoke
+        run: python -m scripts.run_batch_smoke --count 4 --max-retries 1
 
       # ---------------------------------------------------------------- 4.
       - name: Publish article markdown to ntecodex-site
@@ -271,6 +284,25 @@ jobs:
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
         run: python -m scripts.check_publish_streak --days 3
+
+      # ---------------------------------------------------------------- 9.
+      # Velocity check: alert when 3-day rolling pass-rate is below 50%
+      # (slowdown — pool quality / writer issue) or above 75% (headroom —
+      # safe to push more cron / day). Deduplicated via
+      # daily_reports.data_snapshot.velocity_alert so we don't email
+      # 6× / day. continue-on-error so it never blocks the deploy.
+      - name: Velocity check (3-day pass-rate band)
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+        run: python -m src.maintenance.velocity_check
 
       # ---------------------------------------------------------------- 9.
       - name: Notify on failure
