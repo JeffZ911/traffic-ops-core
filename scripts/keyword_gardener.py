@@ -63,9 +63,15 @@ We already have these keywords in the pool — DO NOT duplicate them
 (case-insensitive match):
 {existing_sample}
 
+BLACKLISTED article_types — do NOT propose any keyword whose natural fit
+is one of these (NTE is too new; public information is sparse and the
+writer fabricates). If a topic would only make sense as one of these
+types, skip it:
+{type_blacklist}
+
 Use Google Search to find current player-search-intent keywords (last 30
 days) for {game_name}. Generate exactly {n_target} NEW keywords distributed
-across these required article types:
+across these required article types (only the non-blacklisted ones):
 
 {type_section}
 
@@ -141,6 +147,18 @@ def auto_balance_types(
     )
     have_recent = {r[0] for r in cur.fetchall() if r[0]}
     starved = [t for t in TYPE_HINTS if t not in have_recent]
+
+    # Respect sites.config.content_plan.type_blacklist: never seed keywords
+    # for a category the operator has marked unwritable. Without this, the
+    # auto-balance loop would refill `news` faster than KeywordSelector's
+    # blacklist could filter, producing a flood of doomed candidates.
+    blacklist = set((config.get("content_plan") or {}).get("type_blacklist") or [])
+    if blacklist:
+        before = starved
+        starved = [t for t in starved if t not in blacklist]
+        skipped = [t for t in before if t in blacklist]
+        if skipped:
+            print(f"   ⚖️  skipped blacklisted starved types: {skipped}")
 
     if not starved:
         print("   ⚖️  all article_types have recent coverage — nothing to balance")
@@ -285,12 +303,17 @@ def main() -> int:
     print(f"   → topping up by {args.target}")
 
     game = config.get("game", {})
-    diversity = (config.get("content_plan") or {}).get("diversity", {})
+    content_plan = config.get("content_plan") or {}
+    diversity = content_plan.get("diversity", {})
     required_types = diversity.get("required_types") or list(TYPE_HINTS.keys())
+    type_blacklist: list[str] = list(content_plan.get("type_blacklist") or [])
 
+    # Filter the required_types list by the blacklist so the prompt never
+    # invites a blacklisted category in the first place.
+    allowed_required = [t for t in required_types if t not in type_blacklist]
     type_section = "\n".join(
         f"  - {t}: {TYPE_HINTS.get(t, 'general guide')}"
-        for t in required_types
+        for t in allowed_required
     )
 
     # Sample some existing keywords to feed the prompt (so model knows what to avoid)
@@ -307,6 +330,7 @@ def main() -> int:
         existing_sample=existing_lines,
         n_target=args.target,
         type_section=type_section,
+        type_blacklist=json.dumps(type_blacklist) if type_blacklist else "  (none)",
     )
 
     provider = get_llm_provider("gemini")
