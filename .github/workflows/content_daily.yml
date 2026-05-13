@@ -317,6 +317,24 @@ jobs:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -m scripts.finalize_stuck_articles
 
+      # ---------------------------------------------------------------- 11.
+      # Mobile-responsiveness check: scan today's published articles for
+      # long unbroken text tokens that the global CSS rules don't cover.
+      # Emails warning on regression; dedup'd in daily_reports so we
+      # don't blast 6 alerts/day for one bad ship.
+      - name: Mobile responsiveness check
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+        run: python -m scripts.check_mobile_responsive
+
       # ---------------------------------------------------------------- 9.
       - name: Notify on failure
         if: failure()
