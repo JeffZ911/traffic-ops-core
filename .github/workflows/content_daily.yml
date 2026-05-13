@@ -1,17 +1,40 @@
 name: Content Daily Pipeline
-# Phase 2.4 (2026-05-12): velocity push — 6 cron/day × 4 articles per
-# cron = 24 attempts/day. With ~65% pass-rate this should publish
-# 15-17 articles/day. Budget guard ($150/month, ~30% safety margin
-# for ~$0.40/article × 17/day × 30 = ~$204 worst case) sits in front
-# of every cost step.
+# Phase 2.5 (2026-05-13): full-velocity ramp — 24 cron/day × 3 articles
+# per cron = 72 attempts/day. With ~50-65% pass-rate this should
+# publish 36-46 articles/day. Budget guard at $500/month (3-month
+# runway at saturation) sits in front of every cost step; pause_all
+# at 95% caps actual spend at ~$475 worst case.
+#
+# Sequential within one cron rather than spawning subprocesses: avoids
+# DB race conditions on keywords.last_used_at + slug uniqueness while
+# still hitting 72/day with comfortable per-cron wall-clock (3 × ~4min
+# = ~12min, well under the 60-min interval).
 on:
   schedule:
-    - cron: '0 2 * * *'   # 02:00 UTC = 10:00 Asia/Shanghai
-    - cron: '0 6 * * *'   # 06:00 UTC = 14:00 Asia/Shanghai
-    - cron: '0 10 * * *'  # 10:00 UTC = 18:00 Asia/Shanghai
-    - cron: '0 14 * * *'  # 14:00 UTC = 22:00 Asia/Shanghai
-    - cron: '0 18 * * *'  # 18:00 UTC = 02:00 Asia/Shanghai (next day)
-    - cron: '0 22 * * *'  # 22:00 UTC = 06:00 Asia/Shanghai (next day)
+    - cron: '0 0 * * *'
+    - cron: '0 1 * * *'
+    - cron: '0 2 * * *'
+    - cron: '0 3 * * *'
+    - cron: '0 4 * * *'
+    - cron: '0 5 * * *'
+    - cron: '0 6 * * *'
+    - cron: '0 7 * * *'
+    - cron: '0 8 * * *'
+    - cron: '0 9 * * *'
+    - cron: '0 10 * * *'
+    - cron: '0 11 * * *'
+    - cron: '0 12 * * *'
+    - cron: '0 13 * * *'
+    - cron: '0 14 * * *'
+    - cron: '0 15 * * *'
+    - cron: '0 16 * * *'
+    - cron: '0 17 * * *'
+    - cron: '0 18 * * *'
+    - cron: '0 19 * * *'
+    - cron: '0 20 * * *'
+    - cron: '0 21 * * *'
+    - cron: '0 22 * * *'
+    - cron: '0 23 * * *'
   workflow_dispatch:
 
 # Cancel an in-flight run if a newer one starts
@@ -167,7 +190,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: python -m scripts.run_batch_smoke --count 4 --max-retries 1
+        run: python -m scripts.run_batch_smoke --count 3 --max-retries 1
 
       # ---------------------------------------------------------------- 4.
       - name: Publish article markdown to ntecodex-site
@@ -272,18 +295,25 @@ jobs:
       # operator can investigate before a week of silent failure piles
       # up. continue-on-error so a DB / SMTP hiccup here never blocks
       # the deploy itself (which is already succeeded above).
-      - name: Zero-published streak check (3-day window)
+      # Phase 2.5 (2026-05-13): replaced the publish-streak alert with
+      # real Google-traction signals. At 72 attempts/day "0 published
+      # for 3 days" is a noisy signal — the meaningful signal is
+      # whether Google is indexing + ranking us. The streak script
+      # stays in repo for emergency manual use but is OUT of cron.
+      - name: GSC traction signals (stagnation + positive)
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
-        run: python -m scripts.check_publish_streak --days 3
+        run: python -m src.maintenance.gsc_signal_check
 
       # ---------------------------------------------------------------- 9.
       # Velocity check: alert when 3-day rolling pass-rate is below 50%
