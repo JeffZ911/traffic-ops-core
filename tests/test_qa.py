@@ -157,78 +157,95 @@ def test_execute_strips_honesty_placeholder_and_passes():
     assert out["score"] == 7.5
 
 
-def test_execute_one_fabrication_with_high_fa_passes_after_softening():
-    """Post-2026-05-13 softened rule: a single fabricated term with
-    factual_accuracy >= 1.0 is treated as borderline (close-but-wrong
-    proper noun) rather than hard-failing the article. The placeholder
-    is still stripped from fabricated_terms before the hard-fail check
-    runs.
+def _build_qa_json(score=7.5, fa=2, fab=None):
+    """Helper that builds a canonical QA JSON. Score is in 0-10.
 
-    With factual_accuracy=2.0 and just one real-but-wrong term
-    ('Frost Guardian'), the article passes the hard-fail gate;
-    score 7.5 ≥ threshold 7.0 → passed=True. The term is captured
-    in feedback._borderline_fabrications_allowed for audit."""
-    qa_json = json.dumps({
-        "score_raw_12": 9.0,
-        "score": 7.5,
-        "passed": False,
+    QAAgent re-derives score from the 6 dimension values (sum of dims
+    / 1.2). So to produce a target score we have to distribute it
+    across dims with `fa` fixed. We give intent_match the remainder
+    and keep the rest small — order doesn't matter for tier classification."""
+    raw12 = round(score * 1.2, 2)
+    other_dims_default = 0  # all but intent_match + fa
+    # raw12 = intent + 0 + 0 + 0 + 0 + fa, so intent = raw12 - fa
+    intent = max(min(raw12 - fa, 2.0), 0.0)
+    # If we couldn't fit, redistribute across other dims
+    remainder = max(raw12 - fa - intent, 0.0)
+    info_density = min(remainder, 2.0); remainder -= info_density
+    structure = min(remainder, 2.0); remainder -= structure
+    ai_pattern = min(remainder, 2.0); remainder -= ai_pattern
+    seo = min(remainder, 2.0)
+    return json.dumps({
+        "score_raw_12": raw12,
+        "score": score,
+        "passed": False,    # writer claimed; we recompute
         "feedback": {
-            "intent_match": 2, "info_density": 1, "structure": 2,
-            "ai_pattern": 1, "seo": 1, "factual_accuracy": 2,
-            "fabricated_terms": [
-                "[Information not yet publicly available as of 2026-05-11]",
-                "Frost Guardian",
-            ],
+            "intent_match": intent, "info_density": info_density,
+            "structure": structure, "ai_pattern": ai_pattern,
+            "seo": seo, "factual_accuracy": fa,
+            "fabricated_terms": fab or [],
             "verified_terms": [], "issues": [], "suggestions": [],
         },
     })
-    agent = _qa_with_response(qa_json)
-    out = agent._execute(_base_input())
 
-    assert out["feedback"]["fabricated_terms"] == ["Frost Guardian"]
-    assert out["feedback"]["_honesty_placeholder_stripped"] == [
-        "[Information not yet publicly available as of 2026-05-11]"
-    ]
-    # Softened rule: 1 fab + fa=2 → PASS
+
+def test_tier_clean_when_score_high_no_fab():
+    """qa_score ≥ 7.5 with no fab → tier='clean', no banner needed."""
+    agent = _qa_with_response(_build_qa_json(score=8.0, fa=2, fab=[]))
+    out = agent._execute(_base_input())
+    assert out["tier"] == "clean"
     assert out["passed"] is True
-    assert out["feedback"]["_borderline_fabrications_allowed"] == ["Frost Guardian"]
+    assert out["feedback"]["editorial_tier"] == "clean"
 
 
-def test_execute_two_fabrications_still_hard_fail():
-    """Two or more fabricated terms still hard-fail regardless of
-    factual_accuracy — that's pure hallucination territory."""
-    qa_json = json.dumps({
-        "score_raw_12": 9.0,
-        "score": 7.5,
-        "passed": False,
-        "feedback": {
-            "intent_match": 2, "info_density": 1, "structure": 2,
-            "ai_pattern": 1, "seo": 1, "factual_accuracy": 2,
-            "fabricated_terms": ["Frost Guardian", "Dark Lord"],
-            "verified_terms": [], "issues": [], "suggestions": [],
-        },
-    })
-    agent = _qa_with_response(qa_json)
+def test_tier_note_when_score_mid():
+    """6.0 ≤ qa < 7.5 → tier='note', publishes with banner."""
+    agent = _qa_with_response(_build_qa_json(score=6.5, fa=2, fab=[]))
     out = agent._execute(_base_input())
+    assert out["tier"] == "note"
+    assert out["passed"] is True
+
+
+def test_tier_strong_when_score_low_mid():
+    """4.5 ≤ qa < 6.0 → tier='strong', still publishes with prominent banner."""
+    agent = _qa_with_response(_build_qa_json(score=5.0, fa=1, fab=[]))
+    out = agent._execute(_base_input())
+    assert out["tier"] == "strong"
+    assert out["passed"] is True
+
+
+def test_tier_reject_when_score_very_low():
+    """qa < 4.5 → tier='reject', not published."""
+    agent = _qa_with_response(_build_qa_json(score=3.0, fa=0, fab=[]))
+    out = agent._execute(_base_input())
+    assert out["tier"] == "reject"
     assert out["passed"] is False
 
 
-def test_execute_one_fabrication_with_zero_fa_hard_fails():
-    """One fab but factual_accuracy=0 is still pure hallucination —
-    hard-fail kicks in."""
-    qa_json = json.dumps({
-        "score_raw_12": 9.0,
-        "score": 7.5,
-        "passed": False,
-        "feedback": {
-            "intent_match": 2, "info_density": 1, "structure": 2,
-            "ai_pattern": 1, "seo": 1, "factual_accuracy": 0,
-            "fabricated_terms": ["Frost Guardian"],
-            "verified_terms": [], "issues": [], "suggestions": [],
-        },
-    })
-    agent = _qa_with_response(qa_json)
+def test_one_fab_with_high_fa_gets_small_penalty():
+    """1 fab + fa=2 → -0.3 score penalty; 7.5 → 7.2 → tier='note'."""
+    agent = _qa_with_response(_build_qa_json(score=7.5, fa=2, fab=["Aria of Featherlight"]))
     out = agent._execute(_base_input())
+    assert abs(out["score"] - 7.2) < 0.01
+    assert out["tier"] == "note"
+    assert out["passed"] is True
+    assert "-0.3" in out["feedback"]["_fab_penalty"]
+
+
+def test_three_fabs_get_heavy_penalty_and_likely_reject():
+    """3 fab → -2.0 score penalty; 7.5 → 5.5 → tier='strong' (still ships)."""
+    agent = _qa_with_response(_build_qa_json(score=7.5, fa=2, fab=["A", "B", "C"]))
+    out = agent._execute(_base_input())
+    assert out["feedback"]["_fab_penalty"].startswith("-2.0")
+    assert abs(out["score"] - 5.5) < 0.01
+    assert out["tier"] == "strong"
+    assert out["passed"] is True
+
+
+def test_zero_fa_with_fab_heavy_penalty_drops_to_reject():
+    """fa=0 + any fab → -2.0 penalty; 5.0 → 3.0 → tier='reject'."""
+    agent = _qa_with_response(_build_qa_json(score=5.0, fa=0, fab=["X"]))
+    out = agent._execute(_base_input())
+    assert out["tier"] == "reject"
     assert out["passed"] is False
 
 

@@ -51,6 +51,53 @@ URL_BY_TYPE: dict[str, str] = {
 }
 
 
+# ──── Phase 2.6 editorial-tier banners ────────────────────────────────
+# Auto-inserted right after the H1 by PublishAgent. Two flavors:
+#
+#   tier='note'   → mild blockquote: "AI-assisted, cross-reference in-game"
+#   tier='strong' → stronger blockquote: "Auto-generated, may contain
+#                   approximations, help us improve via comments"
+#
+# No frontmatter flags needed — banner lives in the article body, so
+# ArticleLayout / Pagefind / GSC all see it the same as user content.
+
+EDITORIAL_NOTE_TEMPLATE = (
+    "\n> 📝 **Editorial Note:** This guide is AI-assisted and game data evolves "
+    "rapidly. Please cross-reference with in-game information. "
+    "_Updated: {date}._\n"
+)
+
+EDITORIAL_STRONG_TEMPLATE = (
+    "\n> ⚠️ **Notice:** Auto-generated content. May contain approximations "
+    "or minor inaccuracies in supporting details. "
+    "Help us improve via the comment section below. "
+    "_Last reviewed: {date}._\n"
+)
+
+
+def _inject_editorial_banner(content_md: str, tier: str, date_iso: str) -> str:
+    """Insert the banner blockquote after the first H1, or at the very
+    top if no H1 found. Idempotent — if the banner already exists, no
+    duplicate insertion."""
+    template = (
+        EDITORIAL_STRONG_TEMPLATE if tier == "strong"
+        else EDITORIAL_NOTE_TEMPLATE
+    )
+    banner = template.format(date=date_iso)
+    # Detect prior injection to avoid duplicates on re-runs
+    if "Editorial Note:" in content_md and tier == "note":
+        return content_md
+    if "Notice:** Auto-generated" in content_md and tier == "strong":
+        return content_md
+    # Find first H1 line and insert banner right after it
+    lines = content_md.splitlines(keepends=False)
+    for i, line in enumerate(lines):
+        if line.startswith("# ") and not line.startswith("## "):
+            return "\n".join(lines[: i + 1]) + banner + "\n" + "\n".join(lines[i + 1:])
+    # No H1 found — prepend banner
+    return banner + "\n" + content_md
+
+
 def _yaml_escape(s: str) -> str:
     """Quote a YAML scalar that may contain unsafe chars."""
     if any(c in s for c in (':', '#', '\n', '"', '\'')) or s.strip() != s:
@@ -102,7 +149,7 @@ class PublishAgent(BaseAgent):
         with get_db_connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "select id, slug, title, article_type, status, content_md, "
-                "       qa_score, word_count, outline "
+                "       qa_score, word_count, outline, qa_feedback "
                 "from articles where id = %s",
                 (str(article_id),),
             )
@@ -206,6 +253,23 @@ class PublishAgent(BaseAgent):
             )
         else:
             linked_keywords = []
+
+        # ──── Phase 2.6 (2026-05-13): editorial-tier banner ────
+        # QAAgent classifies every published article into one of three
+        # tiers (clean / note / strong) and writes it to
+        # articles.qa_feedback.editorial_tier. Articles with tier='note'
+        # or 'strong' get an auto-inserted banner right after the H1
+        # so readers know the calibration up front. Banner content is
+        # static markdown — no JS, no component, indexed by Pagefind,
+        # part of the article body for SEO honesty signals.
+        qa_fb = article.get("qa_feedback") or {}
+        tier = (qa_fb.get("editorial_tier")
+                if isinstance(qa_fb, dict) else None) or "clean"
+        if tier in ("note", "strong"):
+            content_md = _inject_editorial_banner(
+                content_md, tier=tier,
+                date_iso=published_at.date().isoformat(),
+            )
 
         body = (
             "---\n"

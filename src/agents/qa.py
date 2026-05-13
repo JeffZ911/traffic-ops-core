@@ -217,35 +217,64 @@ class QAAgent(BaseAgent):
             feedback["fabricated_terms"] = fabricated
             feedback["_honesty_placeholder_stripped"] = stripped
 
-        # Hard-fail rule (softened 2026-05-13 P0):
+        # ──── Phase 2.6 (2026-05-13): multi-tier auto-publish ────
         #
-        # Original: ANY fabricated_term auto-failed the article. That was
-        # correct when most failures were full hallucination (Phase 2.3
-        # NTE-pivot articles). After the multi-game pivot the dominant
-        # failure mode is "writer got the game + character right, named
-        # ONE supporting trace/material/skill close-but-wrong" — e.g.
-        # Robin's ult is `Pinion's Aria` not `Aria of Featherlight`,
-        # Argenti's stack is `Apotheosis` not `Apostle`. These articles
-        # have factual_accuracy=2.0 on the verified majority but the
-        # hard rule killed them anyway, leaving pass-rate at ~17%.
+        # We DROPPED the binary qa_passed/qa_failed split. At 72
+        # attempts/day a 17% pass-rate meant 12/day published — most
+        # of the spend wasted on rejected drafts that would have been
+        # acceptable with a labeled-uncertainty caveat. New scheme:
         #
-        # New rule: allow at most ONE fabricated term IF factual_accuracy
-        # is still strong (≥1.0). Articles with multiple fabrications or
-        # zero factual_accuracy still hard-fail. QA still surfaces the
-        # term in feedback for audit; the operator can rewrite it later.
+        #     qa_score ≥ 7.5    → tier='clean'    (no banner)
+        #     6.0 ≤ qa < 7.5    → tier='note'     (editorial-note banner)
+        #     4.5 ≤ qa < 6.0    → tier='strong'   (strong-warning banner)
+        #     qa_score < 4.5    → tier='reject'   (qa_failed; not published)
+        #
+        # Soft fabrication penalty (replaces the hard-fail gate):
+        #     0 fab terms        → no penalty
+        #     1-2 fab + fa ≥ 1.0 → -0.3 (close-but-wrong proper noun
+        #                                 like 'Aria of Featherlight'
+        #                                 vs the real 'Pinion's Aria')
+        #     3+ fab OR fa < 1.0 → -2.0 (real hallucination; usually
+        #                                 drops the article into 'reject')
+        #
+        # Banner is injected at PublishAgent time (reads
+        # qa_feedback.editorial_tier from the article row). No human
+        # review, no admin queue, no pending status — articles either
+        # ship with a calibrated caveat or are dropped entirely.
         try:
             fa = float(feedback.get("factual_accuracy") or 0)
         except (TypeError, ValueError):
             fa = 0.0
-        hard_fail = len(fabricated) >= 2 or fa < 1.0
-        passed = (score >= pass_threshold) and not hard_fail
-        if fabricated and not hard_fail:
-            feedback["_borderline_fabrications_allowed"] = fabricated
+        fab_count = len(fabricated)
+        score_adjust = 0.0
+        if fab_count >= 3 or fa < 1.0 and fab_count >= 1:
+            score_adjust = -2.0
+            feedback["_fab_penalty"] = f"-2.0 (fab={fab_count}, fa={fa})"
+        elif fab_count >= 1:
+            score_adjust = -0.3
+            feedback["_fab_penalty"] = f"-0.3 (fab={fab_count}, fa={fa})"
+        if score_adjust:
+            score = max(round(score + score_adjust, 2), 0.0)
+
+        if score >= 7.5:
+            tier = "clean"
+        elif score >= 6.0:
+            tier = "note"
+        elif score >= 4.5:
+            tier = "strong"
+        else:
+            tier = "reject"
+        feedback["editorial_tier"] = tier
+
+        # `passed` now means "ship it" — anything tier=clean/note/strong.
+        # tier='reject' is the only non-publish outcome.
+        passed = tier != "reject"
 
         return {
             "score": score,
             "score_raw_12": raw_12,
             "passed": passed,
+            "tier": tier,
             "pass_threshold": pass_threshold,
             "feedback": feedback,
         }
