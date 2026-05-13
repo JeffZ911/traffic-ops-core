@@ -131,15 +131,40 @@ class QAAgent(BaseAgent):
         max_words = int(input_data.get("max_word_count", 2500))
         pass_threshold = float(self.site_config["qa_thresholds"]["min_quality_score"])
 
-        game = self.site_config.get("game", {})
+        # Multi-game (P0 fix 2026-05-13): read game from input_data and look
+        # up game_metadata. Without this, QA verifies every WuWa / HSR /
+        # ZZZ proper noun against "Neverness to Everness" and finds zero
+        # results → flags real entities (Jiyan, Ruan Mei, Anby Demara) as
+        # fabricated → 100% qa_failed across all multi-game articles.
+        # This was the missing piece in Phase 2.3 — Outline + Writing got
+        # the threading, QA didn't.
+        game_slug = input_data.get("game") or "unknown"
+        game_meta_by_slug = self.site_config.get("game_metadata") or {}
+        per_game = game_meta_by_slug.get(game_slug) or {}
+        legacy_game = self.site_config.get("game") or {}
+        game_name = (
+            per_game.get("display_name")
+            or legacy_game.get("name")
+            or "the game"
+        )
+        game_abbr = (
+            per_game.get("short_name")
+            or legacy_game.get("abbreviation")
+            or game_slug
+        )
+        release_date = (
+            per_game.get("release_date")
+            or legacy_game.get("release_date")
+            or "recently"
+        )
         rules = FACTUAL_RULES.format(
-            game_name=game.get("name", "the game"),
-            game_abbr=game.get("abbreviation", ""),
-            release_date=game.get("release_date", "recently"),
+            game_name=game_name,
+            game_abbr=game_abbr,
+            release_date=release_date,
         )
 
         prompt = PROMPT.format(
-            game_name=game.get("name", "the game"),
+            game_name=game_name,
             factual_rules=rules,
             keyword=keyword,
             article_type=article_type,
