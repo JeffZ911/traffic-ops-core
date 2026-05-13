@@ -304,6 +304,19 @@ jobs:
           ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
         run: python -m src.maintenance.velocity_check
 
+      # ---------------------------------------------------------------- 10.
+      # Auto-finalize any article stuck in draft/qa_pending/writing >1h.
+      # Without this, mid-pipeline crashes leave the Dashboard showing
+      # phantom "pending review" rows, violating the autonomous-operations
+      # principle. continue-on-error so a DB hiccup never blocks deploy.
+      - name: Finalize stuck articles (auto-resolve mid-pipeline stalls)
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: python -m scripts.finalize_stuck_articles
+
       # ---------------------------------------------------------------- 9.
       - name: Notify on failure
         if: failure()
