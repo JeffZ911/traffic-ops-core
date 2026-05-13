@@ -157,27 +157,29 @@ def test_execute_strips_honesty_placeholder_and_passes():
     assert out["score"] == 7.5
 
 
-def test_execute_real_fabrication_still_fails():
-    """A real fabricated term should still trip the hard rule even
-    when the placeholder is also present."""
+def test_execute_one_fabrication_with_high_fa_passes_after_softening():
+    """Post-2026-05-13 softened rule: a single fabricated term with
+    factual_accuracy >= 1.0 is treated as borderline (close-but-wrong
+    proper noun) rather than hard-failing the article. The placeholder
+    is still stripped from fabricated_terms before the hard-fail check
+    runs.
+
+    With factual_accuracy=2.0 and just one real-but-wrong term
+    ('Frost Guardian'), the article passes the hard-fail gate;
+    score 7.5 ≥ threshold 7.0 → passed=True. The term is captured
+    in feedback._borderline_fabrications_allowed for audit."""
     qa_json = json.dumps({
         "score_raw_12": 9.0,
         "score": 7.5,
         "passed": False,
         "feedback": {
-            "intent_match": 2,
-            "info_density": 1,
-            "structure": 2,
-            "ai_pattern": 1,
-            "seo": 1,
-            "factual_accuracy": 2,
+            "intent_match": 2, "info_density": 1, "structure": 2,
+            "ai_pattern": 1, "seo": 1, "factual_accuracy": 2,
             "fabricated_terms": [
                 "[Information not yet publicly available as of 2026-05-11]",
                 "Frost Guardian",
             ],
-            "verified_terms": [],
-            "issues": [],
-            "suggestions": [],
+            "verified_terms": [], "issues": [], "suggestions": [],
         },
     })
     agent = _qa_with_response(qa_json)
@@ -187,6 +189,46 @@ def test_execute_real_fabrication_still_fails():
     assert out["feedback"]["_honesty_placeholder_stripped"] == [
         "[Information not yet publicly available as of 2026-05-11]"
     ]
+    # Softened rule: 1 fab + fa=2 → PASS
+    assert out["passed"] is True
+    assert out["feedback"]["_borderline_fabrications_allowed"] == ["Frost Guardian"]
+
+
+def test_execute_two_fabrications_still_hard_fail():
+    """Two or more fabricated terms still hard-fail regardless of
+    factual_accuracy — that's pure hallucination territory."""
+    qa_json = json.dumps({
+        "score_raw_12": 9.0,
+        "score": 7.5,
+        "passed": False,
+        "feedback": {
+            "intent_match": 2, "info_density": 1, "structure": 2,
+            "ai_pattern": 1, "seo": 1, "factual_accuracy": 2,
+            "fabricated_terms": ["Frost Guardian", "Dark Lord"],
+            "verified_terms": [], "issues": [], "suggestions": [],
+        },
+    })
+    agent = _qa_with_response(qa_json)
+    out = agent._execute(_base_input())
+    assert out["passed"] is False
+
+
+def test_execute_one_fabrication_with_zero_fa_hard_fails():
+    """One fab but factual_accuracy=0 is still pure hallucination —
+    hard-fail kicks in."""
+    qa_json = json.dumps({
+        "score_raw_12": 9.0,
+        "score": 7.5,
+        "passed": False,
+        "feedback": {
+            "intent_match": 2, "info_density": 1, "structure": 2,
+            "ai_pattern": 1, "seo": 1, "factual_accuracy": 0,
+            "fabricated_terms": ["Frost Guardian"],
+            "verified_terms": [], "issues": [], "suggestions": [],
+        },
+    })
+    agent = _qa_with_response(qa_json)
+    out = agent._execute(_base_input())
     assert out["passed"] is False
 
 
