@@ -265,6 +265,55 @@ jobs:
         run: |
           python -m scripts.rewrite_one_article --budget-usd 1.00
 
+      # ---------------------------------------------------------------- 6.
+      # P0 FIX (2026-05-13): commit + push the generated .md / image
+      # artifacts back to the ntecodex-site repo BEFORE deploy.
+      #
+      # Root cause this addresses: every cron checks out a clean copy of
+      # ntecodex-site, writes new content into it, then `wrangler pages
+      # deploy dist` ships one build — but the workspace is ephemeral.
+      # The next cron checks out the OLD repo (without our new files),
+      # so each cron clobbers the previous cron's deploy. DB ended up
+      # with 111 published but the live sitemap only showed 45 URLs.
+      #
+      # Fix: stage generated content, commit, pull --rebase to absorb
+      # any concurrent cron's push, then push. Retry up to 3 times on
+      # race losses. Then the deploy below builds from a repo that
+      # actually contains today's AND yesterday's articles.
+      - name: Commit + push generated content back to site repo
+        if: steps.budget.outputs.action != 'pause_all'
+        working-directory: ntecodex-site
+        run: |
+          set -e
+          # Stage the two trees the pipeline writes into:
+          #   src/content/**/*.md  ← PublishAgent
+          #   public/img/<slug>/*  ← ImageAgent (hero + inline images)
+          git add src/content public/img public/_redirects 2>/dev/null || true
+
+          # Nothing to commit? exit clean — the deploy will still run
+          # against whatever is already in the repo.
+          if git diff --cached --quiet; then
+            echo "ℹ️  no new content this cron — skipping commit"
+            exit 0
+          fi
+
+          STAMP="$(date -u +%Y-%m-%d-%H%MZ)"
+          git commit -m "[auto-cron] content batch $STAMP (run ${{ github.run_id }})"
+
+          # Race-tolerant push: another concurrent cron may have pushed
+          # while we were generating. Rebase locally, retry up to 3×.
+          attempt=0
+          until git push origin HEAD:main; do
+            attempt=$((attempt + 1))
+            if [ "$attempt" -ge 3 ]; then
+              echo "❌ push failed after 3 attempts"
+              exit 1
+            fi
+            echo "⚠️  push race lost (attempt $attempt) — rebasing"
+            git pull --rebase origin main
+          done
+          echo "✓ pushed content batch to ntecodex-site"
+
       # ---------------------------------------------------------------- 7.
       - name: Setup Node 22
         if: env.skip_deploy != 'true'
