@@ -180,12 +180,21 @@ def main() -> int:
             clauses.append("and slug = %s")
             params.append(args.slug)
         params.append(args.limit)
+        # P1 fix (2026-05-14): --new-only must image the NEWEST articles
+        # first. The old `order by published_at` (ASC) fetched the OLDEST
+        # 20 within the 48h window — those mostly already had heroes and
+        # got skipped, so this cron's freshly-published articles (sorted
+        # last) were never reached under LIMIT 20 → every new article
+        # shipped image-less. DESC puts today's batch at the front.
+        # Backfill mode (no --new-only) keeps ASC so the oldest
+        # under-imaged articles are still drained over time.
+        order_dir = "desc" if args.new_only else "asc"
         cur.execute(
             f"""
             select id, slug, title, article_type, outline
               from articles
              where site_id = %s and status = 'published' {' '.join(clauses)}
-             order by published_at
+             order by published_at {order_dir}
              limit %s
             """,
             tuple(params),
