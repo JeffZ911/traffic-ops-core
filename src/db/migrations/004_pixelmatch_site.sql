@@ -1,6 +1,12 @@
 -- 004_pixelmatch_site.sql
 -- Phase 1A (2026-05-14): register pixelmatch.art as a second tenant.
 --
+-- ⚠️  REQUIRES the article_type CHECK constraint to also accept the four
+-- ecommerce types. Run migration 005 FIRST (or paste the ALTER block from
+-- there ahead of this insert) or every pixelmatch article will fail to
+-- write to the articles table with `check constraint
+-- articles_article_type_check`.
+--
 -- This migration is INSERT-only — no schema change. The agents picked up
 -- niche="ecommerce_tools" in this same commit, so once this row exists
 -- the orchestrator can produce ecommerce content for pixelmatch.art with
@@ -28,7 +34,24 @@ values (
       'primary_label', 'Generate 50 product images free'
     ),
     'monthly_budget_usd', 500,
-    'qa_thresholds', jsonb_build_object('min_quality_score', 7.0),
+    'qa_thresholds', jsonb_build_object(
+      'min_quality_score', 7.0,
+      'max_retry_rounds', 1
+    ),
+    -- content_plan is required by orchestrator.py (min/max word band)
+    -- and KeywordSelector (type_blacklist). Mirrors ntecodex's shape.
+    'content_plan', jsonb_build_object(
+      'min_word_count', 1400,
+      'max_word_count', 2400,
+      'daily_articles', 6,
+      'type_blacklist', jsonb_build_array(),
+      'diversity', jsonb_build_object(
+        'required_types', jsonb_build_array(
+          'tool_guide', 'vs_comparison', 'use_case', 'policy_guide'
+        ),
+        'min_types_per_week', 3
+      )
+    ),
     'text_provider', jsonb_build_object(
       'qa_model', 'gemini-3.1-pro-preview',
       'outline_model', 'gemini-3.1-pro-preview',

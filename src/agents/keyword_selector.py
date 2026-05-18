@@ -392,6 +392,19 @@ class KeywordSelectorAgent(BaseAgent):
         else:
             game_priorities_section = "  (single-game site; no cross-game balancing)"
 
+        # Niche-aware allowed types (Phase 1B 2026-05-14):
+        #   sites.config.allowed_article_types — when set, this is the
+        #   authoritative list. The KeywordSelector LLM is told to pick
+        #   ONLY from this list. Pixelmatch uses
+        #   [tool_guide, vs_comparison, use_case, policy_guide];
+        #   ntecodex leaves this null so we fall back to ALL_TYPES
+        #   (the gaming taxonomy) minus type_blacklist as before.
+        allowed_override = self.site_config.get("allowed_article_types")
+        if isinstance(allowed_override, list) and allowed_override:
+            allowed_list = [t for t in allowed_override if t not in type_blacklist]
+        else:
+            allowed_list = [t for t in ALL_TYPES if t not in type_blacklist]
+
         prompt = PROMPT.format(
             candidates=json.dumps(candidates, indent=2, ensure_ascii=False),
             track_record="\n".join(tr_lines),
@@ -400,7 +413,7 @@ class KeywordSelectorAgent(BaseAgent):
             ),
             game_priorities_section=game_priorities_section,
             lookback_days=QA_RATE_LOOKBACK_DAYS,
-            allowed_types=", ".join(t for t in ALL_TYPES if t not in type_blacklist),
+            allowed_types=", ".join(allowed_list),
         )
 
         resp = self._call_llm(
@@ -422,9 +435,22 @@ class KeywordSelectorAgent(BaseAgent):
         )
         if not atype:
             raise ValueError(f"LLM did not return article_type: {choice}")
-        if atype not in ALL_TYPES:
+        # Validation universe (Phase 1B 2026-05-14):
+        #   - If site_config.allowed_article_types is set, that list IS
+        #     the universe. Reject anything outside it.
+        #   - Otherwise universe = ALL_TYPES (the gaming taxonomy);
+        #     the *blacklist* check below handles blacklisted-but-known
+        #     types with its own clearer error message.
+        if isinstance(allowed_override, list) and allowed_override:
+            if atype not in allowed_override:
+                raise ValueError(
+                    f"LLM picked article_type={atype!r} outside the "
+                    f"site's allowed_article_types={allowed_override}"
+                )
+        elif atype not in ALL_TYPES:
             raise ValueError(
-                f"LLM picked unknown article_type={atype!r}; allowed={ALL_TYPES}"
+                f"LLM picked unknown article_type={atype!r}; "
+                f"allowed={ALL_TYPES}"
             )
 
         # Look up the chosen keyword's game from the candidate list so
