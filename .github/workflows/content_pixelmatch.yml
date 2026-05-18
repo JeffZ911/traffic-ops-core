@@ -1,0 +1,213 @@
+name: Content Pipeline (pixelmatch.art)
+# Phase 1B (2026-05-14): mirror of content_daily.yml targeting pixelmatch.art.
+#
+# Separate file (not a matrix on the existing workflow) so:
+#   1. ntecodex's working cron stays untouched — zero risk.
+#   2. pixelmatch can ramp at its own schedule. Start at 2-cron/day until we
+#      have ~30 articles + GSC signal, then scale to 24/day to match ntecodex.
+#   3. Each site has its own budget guard, its own commit/push to its own
+#      site repo, its own deploy.
+#
+# Reuses every Phase-2.5 → Phase-2.6 fix that ntecodex already proved out:
+#   - P0 commit/push step (workspace persistence)
+#   - DESC image ordering (newest article gets imaged first)
+#   - explicit 404 page (no SPA fallback)
+#   - mobile-responsiveness check
+#   - finalize_stuck_articles
+#
+# SITE_DOMAIN env routes every script to pixelmatch.art's `sites` row.
+# Niche-aware agents (Phase 1A) then automatically use the ecommerce
+# prompt family because the row's `config.niche == "ecommerce_tools"`.
+
+on:
+  schedule:
+    # Slow start: 2 crons/day at 03:00 and 15:00 UTC. Each cron writes
+    # 3 articles → ~6 articles/day for the first ~2 weeks while we
+    # verify QA pass-rate, CTA conversion, and GSC indexing.
+    # When data looks good, replace this block with 24 entries cloned
+    # from content_daily.yml.
+    - cron: '0 3 * * *'
+    - cron: '0 15 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: content-pixelmatch
+  cancel-in-progress: false
+
+env:
+  # Single source of truth — every step references this. Switching sites
+  # is one variable away.
+  SITE_DOMAIN: pixelmatch.art
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout traffic-ops-core
+        uses: actions/checkout@v4
+
+      - name: Checkout pixelmatch-site (cross-repo)
+        uses: actions/checkout@v4
+        with:
+          repository: JeffZ911/pixelmatch-site
+          # PIXELMATCH_SITE_REPO_PAT must have repo:contents:write on
+          # the pixelmatch-site repo. Configure in repo settings before
+          # enabling the cron above.
+          token: ${{ secrets.PIXELMATCH_SITE_REPO_PAT }}
+          path: pixelmatch-site
+          fetch-depth: 0
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Python deps
+        run: pip install -e .
+
+      - name: Configure git for site repo
+        working-directory: pixelmatch-site
+        run: |
+          git config user.name "${{ secrets.GIT_USER_NAME }}"
+          git config user.email "${{ secrets.GIT_USER_EMAIL }}"
+
+      # ── 0. Budget guard ─────────────────────────────────────────────
+      - name: Budget guard
+        id: budget
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set +e
+          python -m src.utils.budget_guard --site $SITE_DOMAIN --json > /tmp/budget.json
+          rc=$?
+          cat /tmp/budget.json
+          ACTION=$(python -c "import json; print(json.load(open('/tmp/budget.json'))['action'])")
+          echo "action=$ACTION" >> "$GITHUB_OUTPUT"
+          if [ "$rc" = "78" ]; then
+            echo "🛑 Budget pause_all for $SITE_DOMAIN — short-circuiting."
+          fi
+
+      # ── 1. Garden the keyword pool ───────────────────────────────────
+      - name: Garden the keyword pool
+        if: steps.budget.outputs.action != 'pause_all'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          python -m scripts.keyword_gardener --min-planned 20 --target 12
+
+      # ── 2. Generate articles ────────────────────────────────────────
+      - name: Generate articles (batch=3)
+        if: steps.budget.outputs.action != 'pause_all'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python -m scripts.run_batch_smoke --count 3 --max-retries 1
+
+      # ── 3. Publish article markdown ─────────────────────────────────
+      - name: Publish article markdown to pixelmatch-site
+        if: steps.budget.outputs.action != 'pause_all'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SITE_REPO_PATH: ${{ github.workspace }}/pixelmatch-site
+        run: python -m scripts.publish_articles
+
+      # ── 4. Images ───────────────────────────────────────────────────
+      - name: Install Pillow
+        if: steps.budget.outputs.action != 'pause_all'
+        run: pip install --quiet Pillow
+
+      - name: Generate hero + 6 inline images for the NEW article
+        if: steps.budget.outputs.action != 'pause_all'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SITE_REPO_PATH: ${{ github.workspace }}/pixelmatch-site
+        run: |
+          python -m scripts.run_image_for_articles --new-only --inline 6 --budget-usd 0.50
+
+      # ── 5. Commit + push back to site repo (P0 fix, mandatory) ──────
+      - name: Commit + push generated content back to site repo
+        if: steps.budget.outputs.action != 'pause_all'
+        working-directory: pixelmatch-site
+        run: |
+          set -e
+          git add src/content public/img public/_redirects 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "ℹ️  no new content this cron — skipping commit"
+            exit 0
+          fi
+          STAMP="$(date -u +%Y-%m-%d-%H%MZ)"
+          git commit -m "[auto-cron pixelmatch] content batch $STAMP (run ${{ github.run_id }})"
+          attempt=0
+          until git push origin HEAD:main; do
+            attempt=$((attempt + 1))
+            if [ "$attempt" -ge 3 ]; then
+              echo "❌ push failed after 3 attempts"; exit 1
+            fi
+            echo "⚠️  push race lost (attempt $attempt) — rebasing"
+            git pull --rebase origin main
+          done
+          echo "✓ pushed content batch to pixelmatch-site"
+
+      # ── 6. Build + deploy ───────────────────────────────────────────
+      - name: Setup Node 22
+        if: steps.budget.outputs.action != 'pause_all'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build Astro site
+        if: steps.budget.outputs.action != 'pause_all'
+        working-directory: pixelmatch-site
+        run: |
+          npm install
+          npm run build
+
+      - name: Deploy to Cloudflare Pages
+        if: steps.budget.outputs.action != 'pause_all'
+        working-directory: pixelmatch-site
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx --yes wrangler@latest pages deploy dist \
+            --project-name pixelmatch-blog --branch main --commit-dirty=true
+
+      # ── 7. Maintenance tail ─────────────────────────────────────────
+      - name: Finalize stuck articles
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: python -m scripts.finalize_stuck_articles
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+        run: |
+          python -m src.utils.send_alert \
+            --type=pipeline_failure \
+            --workflow=content_pixelmatch \
+            --severity=critical \
+            --subject="Content Pipeline (pixelmatch.art) failed" \
+            --message="Run ${{ github.run_id }} failed. Check ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

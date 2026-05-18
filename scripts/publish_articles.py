@@ -37,13 +37,18 @@ def main() -> int:
         print(f"❌ site repo not found at {SITE_REPO}")
         return 2
 
+    # Multi-tenant (Phase 1B 2026-05-14): SITE_DOMAIN env selects which
+    # tenant to publish for. Defaults to ntecodex.com so existing
+    # workflows behave unchanged.
+    site_domain = os.getenv("SITE_DOMAIN", "ntecodex.com")
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "select s.id, s.config from sites s where s.domain = 'ntecodex.com' limit 1"
+            "select s.id, s.config from sites s where s.domain = %s limit 1",
+            (site_domain,),
         )
         site_row = cur.fetchone()
         if not site_row:
-            print("❌ ntecodex.com site not found")
+            print(f"❌ site {site_domain!r} not found in sites table")
             return 2
         site_id, config = site_row
 
