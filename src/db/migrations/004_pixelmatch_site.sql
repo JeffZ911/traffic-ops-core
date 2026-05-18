@@ -9,10 +9,11 @@
 -- Idempotent: ON CONFLICT DO UPDATE so re-running just refreshes the
 -- config blob without duplicating sites.
 
-insert into sites (id, domain, config, created_at, updated_at)
+insert into sites (id, domain, site_name, config, created_at, updated_at)
 values (
   gen_random_uuid(),
   'pixelmatch.art',
+  'PixelMatch Blog',
   jsonb_build_object(
     'niche', 'ecommerce_tools',
     'brand', jsonb_build_object(
@@ -80,6 +81,7 @@ values (
 )
 on conflict (domain) do update
    set config = excluded.config,
+       site_name = excluded.site_name,
        updated_at = now();
 
 -- Sanity check the new row.
