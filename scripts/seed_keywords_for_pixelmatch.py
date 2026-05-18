@@ -39,11 +39,25 @@ batch-generates AI product images for ecommerce sellers. Generate
 exactly {count} long-tail search keywords that real {audience_label}
 are using today.
 
-Topical scope — distribute across these four content buckets:
-  - tool_guide:    ~35%  ("how to remove product photo background", "batch resize amazon images", "white background photo editor for {audience_short}")
-  - vs_comparison: ~25%  ("photoroom vs canva for amazon", "pebblely vs photoai 2026")
-  - use_case:      ~25%  ("amazon seller increased ctr with ai", "shopify dropshipper lifestyle photos workflow")
-  - policy_guide:  ~15%  ("amazon main image requirements", "etsy listing photo guidelines 2026", "tiktok shop image policy")
+Topical scope — **hard quota** across these four content buckets.
+You MUST distribute the {count} keywords across types like this:
+  - tool_guide:    ~35%  → roughly {count_tool} keywords
+       ("how to remove product photo background", "batch resize amazon images",
+        "white background photo editor for {audience_short}")
+  - vs_comparison: ~25%  → roughly {count_vs} keywords
+       ("photoroom vs canva for amazon", "pebblely vs photoroom 2026",
+        "best ai product photo tool {audience_short} 2026")
+  - use_case:      ~25%  → roughly {count_uc} keywords
+       ("amazon seller increased ctr with ai product photos",
+        "shopify dropshipper lifestyle photos workflow",
+        "etsy print on demand seller doubled sales with ai mockups")
+  - policy_guide:  ~15%  → roughly {count_pg} keywords
+       ("amazon main image requirements 2026", "etsy listing photo guidelines",
+        "tiktok shop image policy", "shopify product image SEO best practices")
+
+THIS IS A HARD CONSTRAINT. If you return all keywords as one type
+the seed will be rejected and re-run, wasting budget. Spread across
+all four types per the percentages above.
 
 Per-platform terminology and constraints (current as of 2026):
 {platform_block}
@@ -184,6 +198,10 @@ def main() -> int:
     prompt = SEED_PROMPT.format(
         brand_name=brand_name,
         count=args.count,
+        count_tool=round(args.count * 0.35),
+        count_vs=round(args.count * 0.25),
+        count_uc=round(args.count * 0.25),
+        count_pg=round(args.count * 0.15),
         audience_label=audience_label,
         audience_short=audience_short,
         platform_block=_build_platform_block(platforms),
@@ -242,14 +260,39 @@ def main() -> int:
 
     if args.dry_run:
         print()
-        print("--- dry run preview (top 20) ---")
-        for item in kept[:20]:
+        print(f"--- dry run preview (all {len(kept)}) ---")
+        for item in kept:
             print(
                 f"  pri={item.get('priority_score', '?')}  "
                 f"plat={item.get('platform','?'):11s}  "
                 f"type={item.get('article_type','?'):14s}  "
                 f"{item.get('keyword')!r}"
             )
+
+        # Distribution summary — surface skew so the operator can
+        # eyeball whether the LLM honored the prompt's 35/25/25/15
+        # type mix before paying for a real seed.
+        print()
+        print("--- distribution: platform × type ---")
+        from collections import Counter
+        by_type = Counter(i.get("article_type", "?") for i in kept)
+        by_platform = Counter(i.get("platform", "?") for i in kept)
+        by_combo = Counter(
+            (i.get("platform", "?"), i.get("article_type", "?")) for i in kept
+        )
+        print(f"  by type:     " + "  ".join(f"{k}={v}" for k, v in by_type.most_common()))
+        print(f"  by platform: " + "  ".join(f"{k}={v}" for k, v in by_platform.most_common()))
+        print()
+        print("  grid (rows=platform, cols=type):")
+        types = sorted({t for _, t in by_combo})
+        plats = sorted({p for p, _ in by_combo})
+        header = "    " + " ".join(f"{t[:12]:>12s}" for t in types) + "   total"
+        print(header)
+        for p in plats:
+            row = [f"{p:11s}"] + [
+                f"{by_combo.get((p, t), 0):>12d}" for t in types
+            ] + [f"{by_platform[p]:>7d}"]
+            print("    " + " ".join(row))
         return 0
 
     inserted = 0
