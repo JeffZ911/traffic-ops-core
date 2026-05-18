@@ -13,6 +13,12 @@ import json
 from typing import Any
 
 from src.agents._json_extract import extract_json
+from src.agents._prompts_ecommerce import (
+    ECOMMERCE_TYPE_SECTIONS,
+    FACTUAL_RULES as ECOM_FACTUAL_RULES,
+    OUTLINE_GENERIC_PROMPT as ECOM_OUTLINE_GENERIC,
+    OUTLINE_USE_CASE_PROMPT as ECOM_OUTLINE_USE_CASE,
+)
 from src.agents.base import BaseAgent
 
 
@@ -150,6 +156,15 @@ class OutlineAgent(BaseAgent):
         article_type = input_data["article_type"]
         target_words = int(input_data.get("target_word_count", 1500))
 
+        # Niche branch (Phase 1A pixelmatch): when site_config.niche
+        # is "ecommerce_tools" we route to the ecommerce prompt
+        # family (no game_name framing, B2B SaaS voice, seller-facing
+        # factuality rules). Default niche="gaming" keeps the existing
+        # behavior for ntecodex untouched.
+        niche = self.site_config.get("niche") or "gaming"
+        if niche == "ecommerce_tools":
+            return self._execute_ecommerce(input_data)
+
         # Multi-game (Phase 2.3+): prefer per-article game metadata
         # from input_data['game'], falling back to legacy
         # site_config.game for single-game sites. Without this, every
@@ -217,4 +232,83 @@ class OutlineAgent(BaseAgent):
         if not isinstance(outline["sections"], list) or not outline["sections"]:
             raise ValueError("Outline.sections must be a non-empty list")
 
+        return outline
+
+    # ────────────────────────────────────────────────────────────────
+    # Ecommerce niche branch — used when site_config.niche == "ecommerce_tools".
+    # ────────────────────────────────────────────────────────────────
+    def _execute_ecommerce(self, input_data: dict[str, Any]) -> dict[str, Any]:
+        from datetime import date as _date
+
+        keyword = input_data["keyword"]
+        article_type = input_data["article_type"]
+        target_words = int(input_data.get("target_word_count", 1800))
+
+        # Platform metadata: orchestrator threads input_data['platform']
+        # (amazon_fba | shopify | etsy | tiktok_shop). Falls back to
+        # "multi" for cross-platform articles.
+        platform_slug = input_data.get("platform") or "multi"
+        platform_meta_by_slug = self.site_config.get("platform_metadata") or {}
+        per_platform = platform_meta_by_slug.get(platform_slug) or {}
+        audience_label = (
+            per_platform.get("display_name")
+            or "multi-platform ecommerce sellers"
+        )
+        official_docs_list = ", ".join(per_platform.get("official_docs") or [
+            "sellercentral.amazon.com", "help.shopify.com",
+            "help.etsy.com", "seller.tiktok.com/help",
+        ])
+        platform_subreddit = per_platform.get("subreddit") or "FulfillmentByAmazon"
+
+        brand = self.site_config.get("brand") or {}
+        brand_name = brand.get("name") or "the publisher's tool"
+
+        rules = ECOM_FACTUAL_RULES.format(
+            audience_label=audience_label,
+            today_iso=_date.today().isoformat(),
+            official_docs_list=official_docs_list,
+            platform_subreddit=platform_subreddit,
+            brand_name=brand_name,
+        )
+
+        if article_type == "use_case":
+            prompt = ECOM_OUTLINE_USE_CASE.format(
+                brand_name=brand_name,
+                audience_label=audience_label,
+                factual_rules=rules,
+                keyword=keyword,
+                target_words=target_words,
+            )
+        else:
+            sections = ECOMMERCE_TYPE_SECTIONS.get(
+                article_type, ["Overview", "Step-by-Step", "FAQ"]
+            )
+            prompt = ECOM_OUTLINE_GENERIC.format(
+                brand_name=brand_name,
+                audience_label=audience_label,
+                factual_rules=rules,
+                keyword=keyword,
+                article_type=article_type,
+                sections=", ".join(sections),
+                target_words=target_words,
+            )
+
+        resp = self._call_llm(
+            prompt=prompt,
+            max_tokens=8000,
+            temperature=0.4,
+            json_mode=True,
+            enable_search=True,
+        )
+        outline = extract_json(resp.text)
+        for required in ("title", "slug", "h1", "sections"):
+            if required not in outline:
+                raise ValueError(f"Outline missing field: {required}")
+        if not isinstance(outline["sections"], list) or not outline["sections"]:
+            raise ValueError("Outline.sections must be a non-empty list")
+        # Tag the niche + platform back into the outline so downstream
+        # agents (and PublishAgent) can route on it without re-querying
+        # site_config.
+        outline.setdefault("niche", "ecommerce_tools")
+        outline.setdefault("platform", platform_slug)
         return outline

@@ -6,6 +6,10 @@ import json
 import re
 from typing import Any
 
+from src.agents._prompts_ecommerce import (
+    FACTUAL_RULES as ECOM_FACTUAL_RULES,
+    WRITING_PROMPT as ECOM_WRITING_PROMPT,
+)
 from src.agents.base import BaseAgent
 
 
@@ -96,6 +100,11 @@ class WritingAgent(BaseAgent):
     max_retries = 2
 
     def _execute(self, input_data: dict[str, Any]) -> dict[str, Any]:
+        # Niche branch (Phase 1A pixelmatch): ecommerce_tools sites
+        # use a B2B SaaS voice + seller-facing factuality rules.
+        if (self.site_config.get("niche") or "gaming") == "ecommerce_tools":
+            return self._execute_ecommerce(input_data)
+
         from datetime import date as _date
         keyword = input_data["keyword"]
         article_type = input_data["article_type"]
@@ -183,6 +192,100 @@ class WritingAgent(BaseAgent):
 
         # Word count: split on whitespace, drop punctuation-only tokens.
         # Excludes the Sources section so the band check reflects body length.
+        body_for_count = re.split(r"\n##\s*Sources\s*\n", content, maxsplit=1)[0]
+        words = re.findall(r"\b\w+\b", body_for_count)
+        word_count = len(words)
+
+        if "## " not in content and "# " not in content:
+            raise RuntimeError("Writing output has no H1/H2 markdown headings")
+
+        return {
+            "content_md": content,
+            "word_count": word_count,
+        }
+
+    # ────────────────────────────────────────────────────────────────
+    # Ecommerce niche branch
+    # ────────────────────────────────────────────────────────────────
+    def _execute_ecommerce(self, input_data: dict[str, Any]) -> dict[str, Any]:
+        from datetime import date as _date
+
+        keyword = input_data["keyword"]
+        article_type = input_data["article_type"]
+        outline = input_data["outline"]
+        min_words = int(input_data.get("min_word_count", 1400))
+        max_words = int(input_data.get("max_word_count", 2600))
+        feedback = input_data.get("qa_feedback")
+
+        platform_slug = (
+            input_data.get("platform")
+            or outline.get("platform")
+            or "multi"
+        )
+        platform_meta_by_slug = self.site_config.get("platform_metadata") or {}
+        per_platform = platform_meta_by_slug.get(platform_slug) or {}
+        audience_label = (
+            per_platform.get("display_name")
+            or "multi-platform ecommerce sellers"
+        )
+        official_docs_list = ", ".join(per_platform.get("official_docs") or [
+            "sellercentral.amazon.com", "help.shopify.com",
+            "help.etsy.com", "seller.tiktok.com/help",
+        ])
+        platform_subreddit = per_platform.get("subreddit") or "FulfillmentByAmazon"
+        brand = self.site_config.get("brand") or {}
+        brand_name = brand.get("name") or "the publisher's tool"
+
+        rules = ECOM_FACTUAL_RULES.format(
+            audience_label=audience_label,
+            today_iso=_date.today().isoformat(),
+            official_docs_list=official_docs_list,
+            platform_subreddit=platform_subreddit,
+            brand_name=brand_name,
+        )
+
+        feedback_block = ""
+        if feedback:
+            banned = feedback.get("fabricated_terms") or []
+            ban_section = ""
+            if banned:
+                bullet = "\n".join(f"   - {t}" for t in banned)
+                ban_section = (
+                    "\nBANNED CLAIMS — these did NOT verify in search last "
+                    "time. Do NOT repeat them. If you need to refer to such "
+                    "a fact, write '[Information not yet publicly available "
+                    "as of " + _date.today().isoformat() + "]' or omit:\n"
+                    + bullet + "\n"
+                )
+            feedback_block = (
+                "PREVIOUS ATTEMPT FAILED QA. Address these issues in this "
+                f"rewrite:\n{json.dumps(feedback, indent=2, ensure_ascii=False)}\n"
+                + ban_section
+            )
+
+        prompt = ECOM_WRITING_PROMPT.format(
+            brand_name=brand_name,
+            audience_label=audience_label,
+            factual_rules=rules,
+            keyword=keyword,
+            article_type=article_type,
+            min_words=min_words,
+            max_words=max_words,
+            outline_json=json.dumps(outline, indent=2, ensure_ascii=False),
+            feedback_block=feedback_block,
+        )
+
+        resp = self._call_llm(
+            prompt=prompt,
+            max_tokens=12000,
+            temperature=0.7,
+            json_mode=False,
+            enable_search=True,
+        )
+        content = resp.text.strip()
+        if not content:
+            raise RuntimeError("Writing returned empty content (likely thinking-budget issue)")
+
         body_for_count = re.split(r"\n##\s*Sources\s*\n", content, maxsplit=1)[0]
         words = re.findall(r"\b\w+\b", body_for_count)
         word_count = len(words)

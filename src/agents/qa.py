@@ -11,6 +11,10 @@ import re
 from typing import Any
 
 from src.agents._json_extract import extract_json
+from src.agents._prompts_ecommerce import (
+    QA_FACTUAL_RULES as ECOM_QA_FACTUAL_RULES,
+    QA_PROMPT as ECOM_QA_PROMPT,
+)
 from src.agents.base import BaseAgent
 
 
@@ -135,6 +139,12 @@ class QAAgent(BaseAgent):
         max_words = int(input_data.get("max_word_count", 2500))
         pass_threshold = float(self.site_config["qa_thresholds"]["min_quality_score"])
 
+        # Niche branch (Phase 1A pixelmatch): pick prompt family. Default
+        # "gaming" preserves ntecodex behavior. "ecommerce_tools" swaps in
+        # B2B-SaaS-aware factuality rules — does NOT change scoring
+        # weights, tier thresholds, or fab-penalty math below.
+        niche = self.site_config.get("niche") or "gaming"
+
         # Multi-game (P0 fix 2026-05-13): read game from input_data and look
         # up game_metadata. Without this, QA verifies every WuWa / HSR /
         # ZZZ proper noun against "Neverness to Everness" and finds zero
@@ -161,24 +171,55 @@ class QAAgent(BaseAgent):
             or legacy_game.get("release_date")
             or "recently"
         )
-        rules = FACTUAL_RULES.format(
-            game_name=game_name,
-            game_abbr=game_abbr,
-            release_date=release_date,
-        )
-
-        prompt = PROMPT.format(
-            game_name=game_name,
-            factual_rules=rules,
-            keyword=keyword,
-            article_type=article_type,
-            min_words=min_words,
-            max_words=max_words,
-            actual_words=actual_words,
-            outline_json=json.dumps(outline, indent=2, ensure_ascii=False),
-            content=content,
-            pass_threshold=pass_threshold,
-        )
+        if niche == "ecommerce_tools":
+            from datetime import date as _date
+            platform_slug = (
+                input_data.get("platform")
+                or (outline.get("platform") if isinstance(outline, dict) else None)
+                or "multi"
+            )
+            platform_meta_by_slug = self.site_config.get("platform_metadata") or {}
+            per_platform = platform_meta_by_slug.get(platform_slug) or {}
+            audience_label = (
+                per_platform.get("display_name")
+                or "multi-platform ecommerce sellers"
+            )
+            brand_name = (self.site_config.get("brand") or {}).get("name") or "the publisher's tool"
+            rules = ECOM_QA_FACTUAL_RULES.format(
+                audience_label=audience_label,
+                brand_name=brand_name,
+            )
+            prompt = ECOM_QA_PROMPT.format(
+                brand_name=brand_name,
+                audience_label=audience_label,
+                factual_rules=rules,
+                keyword=keyword,
+                article_type=article_type,
+                min_words=min_words,
+                max_words=max_words,
+                actual_words=actual_words,
+                outline_json=json.dumps(outline, indent=2, ensure_ascii=False),
+                content=content,
+                pass_threshold=pass_threshold,
+            )
+        else:
+            rules = FACTUAL_RULES.format(
+                game_name=game_name,
+                game_abbr=game_abbr,
+                release_date=release_date,
+            )
+            prompt = PROMPT.format(
+                game_name=game_name,
+                factual_rules=rules,
+                keyword=keyword,
+                article_type=article_type,
+                min_words=min_words,
+                max_words=max_words,
+                actual_words=actual_words,
+                outline_json=json.dumps(outline, indent=2, ensure_ascii=False),
+                content=content,
+                pass_threshold=pass_threshold,
+            )
 
         resp = self._call_llm(
             prompt=prompt,
