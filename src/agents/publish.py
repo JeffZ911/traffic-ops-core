@@ -318,19 +318,18 @@ class PublishAgent(BaseAgent):
         rel_without_collection = rel.split("/", 1)[1] if "/" in rel else rel
         entry_slug = rel_without_collection[:-len(".md")] if rel_without_collection.endswith(".md") else rel_without_collection
 
-        # Carry the article's `game` from outline jsonb into frontmatter
-        # so Astro can filter / route by game without a schema change.
+        # Carry the article's audience tag from outline jsonb into
+        # frontmatter so Astro can filter / route by it without a
+        # schema change. Niche decides the field name:
+        #   gaming         → "game"     (wuwa | hsr | zzz | genshin | nte)
+        #   ecommerce_tools → "platform" (amazon_fba | shopify | etsy | tiktok_shop | multi)
         outline_blob = article.get("outline") or {}
-        game_slug = (
-            (outline_blob.get("game") if isinstance(outline_blob, dict) else None)
-            or "nte"   # safe default for any pre-multi-game article
-        )
+        site_niche = (self.site_config.get("niche") or "gaming")
 
         # Build frontmatter
         fm: dict[str, Any] = {
             "title": article["title"] or slug,
             "slug": entry_slug,
-            "game": game_slug,
             "article_type": article_type,
             "qa_score": float(article["qa_score"] or 0),
             "word_count": int(article["word_count"] or 0),
@@ -338,6 +337,28 @@ class PublishAgent(BaseAgent):
             "published_url": published_url,
             "sources": [s.get("uri") for s in sources if s.get("uri")],
         }
+
+        if site_niche == "ecommerce_tools":
+            platform_slug = (
+                (outline_blob.get("platform")
+                 if isinstance(outline_blob, dict) else None)
+                or "multi"
+            )
+            fm["platform"] = platform_slug
+            # use_case-specific structured fields (Phase 1B): surface
+            # them so the stories/[...slug].astro layout can render
+            # the before/after metric table above the body.
+            if article_type == "use_case" and isinstance(outline_blob, dict):
+                for k in ("seller_profile", "is_composite", "key_metrics"):
+                    if k in outline_blob:
+                        fm[k] = outline_blob[k]
+        else:
+            # Gaming default — preserves ntecodex behavior exactly.
+            game_slug = (
+                (outline_blob.get("game") if isinstance(outline_blob, dict) else None)
+                or "nte"
+            )
+            fm["game"] = game_slug
         # character_db: surface the structured outline so Astro template can render cards
         if article_type == "character_db" and isinstance(article["outline"], dict):
             fm["character_data"] = article["outline"]
