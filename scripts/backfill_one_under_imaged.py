@@ -53,13 +53,14 @@ def main() -> int:
         print("❌ SITE_REPO_PATH env var not set")
         return 2
 
+    site_domain = os.getenv("SITE_DOMAIN", "ntecodex.com")
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "select id from sites where domain = 'ntecodex.com' limit 1"
+            "select id from sites where domain = %s limit 1", (site_domain,)
         )
         row = cur.fetchone()
         if not row:
-            print("❌ ntecodex.com site row missing")
+            print(f"❌ site {site_domain!r} not in sites")
             return 2
         site_id = row[0]
 

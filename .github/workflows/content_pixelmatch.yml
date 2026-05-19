@@ -1,31 +1,23 @@
 name: Content Pipeline (pixelmatch.art)
-# Phase 1B (2026-05-14): mirror of content_daily.yml targeting pixelmatch.art.
+# Site-2 pipeline. STRUCTURALLY IDENTICAL to content_daily.yml (the
+# ntecodex template) — every step and every continue-on-error policy
+# mirrors the proven template. The only intentional differences:
 #
-# Separate file (not a matrix on the existing workflow) so:
-#   1. ntecodex's working cron stays untouched — zero risk.
-#   2. pixelmatch can ramp at its own schedule. Start at 2-cron/day until we
-#      have ~30 articles + GSC signal, then scale to 24/day to match ntecodex.
-#   3. Each site has its own budget guard, its own commit/push to its own
-#      site repo, its own deploy.
+#   1. SITE_DOMAIN env routes scripts to pixelmatch.art's sites row.
+#   2. SITE_REPO_PATH points at the pixelmatch-site checkout.
+#   3. PAT secret + Pages project name swap: PIXELMATCH_SITE_REPO_PAT
+#      + Cloudflare Pages project `pixelmatch-blog`.
+#   4. Per-site GA4 / GSC secrets use the PIXELMATCH_ prefix so
+#      collectors/base.site_env_prefix() resolves to the right env vars.
+#   5. SLOW START schedule — 2 crons/day (03:00 + 15:00 UTC) until
+#      pixelmatch has ≥30 articles + GSC traction; then expand to 24/day
+#      by cloning content_daily.yml's schedule block.
 #
-# Reuses every Phase-2.5 → Phase-2.6 fix that ntecodex already proved out:
-#   - P0 commit/push step (workspace persistence)
-#   - DESC image ordering (newest article gets imaged first)
-#   - explicit 404 page (no SPA fallback)
-#   - mobile-responsiveness check
-#   - finalize_stuck_articles
-#
-# SITE_DOMAIN env routes every script to pixelmatch.art's `sites` row.
-# Niche-aware agents (Phase 1A) then automatically use the ecommerce
-# prompt family because the row's `config.niche == "ecommerce_tools"`.
+# When a third site is added (e.g. brand3.com): copy this file, swap
+# the prefix once, never re-author the body.
 
 on:
   schedule:
-    # Slow start: 2 crons/day at 03:00 and 15:00 UTC. Each cron writes
-    # 3 articles → ~6 articles/day for the first ~2 weeks while we
-    # verify QA pass-rate, CTA conversion, and GSC indexing.
-    # When data looks good, replace this block with 24 entries cloned
-    # from content_daily.yml.
     - cron: '0 3 * * *'
     - cron: '0 15 * * *'
   workflow_dispatch:
@@ -35,8 +27,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Single source of truth — every step references this. Switching sites
-  # is one variable away.
+  # Single source of truth — every script reads this for tenant routing.
   SITE_DOMAIN: pixelmatch.art
 
 jobs:
@@ -52,9 +43,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: JeffZ911/pixelmatch-site
-          # PIXELMATCH_SITE_REPO_PAT must have repo:contents:write on
-          # the pixelmatch-site repo. Configure in repo settings before
-          # enabling the cron above.
+          # PAT with repo:contents:write on JeffZ911/pixelmatch-site.
           token: ${{ secrets.PIXELMATCH_SITE_REPO_PAT }}
           path: pixelmatch-site
           fetch-depth: 0
@@ -73,7 +62,11 @@ jobs:
           git config user.name "${{ secrets.GIT_USER_NAME }}"
           git config user.email "${{ secrets.GIT_USER_EMAIL }}"
 
-      # ── 0. Budget guard ─────────────────────────────────────────────
+      # ---------------------------------------------------------------- 0.
+      # Budget guard — reads sites.config.monthly_budget_usd and the
+      # running month-to-date sum of agent_runs.cost_usd. Emits action ∈
+      # {normal, warn, limit_extras, pause_all}; pause_all short-circuits
+      # the rest of the workflow.
       - name: Budget guard
         id: budget
         env:
@@ -86,12 +79,72 @@ jobs:
           rc=$?
           cat /tmp/budget.json
           ACTION=$(python -c "import json; print(json.load(open('/tmp/budget.json'))['action'])")
-          echo "action=$ACTION" >> "$GITHUB_OUTPUT"
+          PERCENT=$(python -c "import json; print(json.load(open('/tmp/budget.json'))['percent'])")
+          SPENT=$(python -c "import json; print(json.load(open('/tmp/budget.json'))['spent_usd'])")
+          BUDGET=$(python -c "import json; print(json.load(open('/tmp/budget.json'))['budget_usd'])")
+          echo "action=$ACTION"   >> "$GITHUB_OUTPUT"
+          echo "percent=$PERCENT" >> "$GITHUB_OUTPUT"
+          echo "spent=$SPENT"     >> "$GITHUB_OUTPUT"
+          echo "budget=$BUDGET"   >> "$GITHUB_OUTPUT"
           if [ "$rc" = "78" ]; then
-            echo "🛑 Budget pause_all for $SITE_DOMAIN — short-circuiting."
+            echo "🛑 Budget guard says pause_all — short-circuiting workflow."
           fi
 
-      # ── 1. Garden the keyword pool ───────────────────────────────────
+      - name: Alert on pause_all
+        if: steps.budget.outputs.action == 'pause_all'
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+        run: |
+          python -m src.utils.send_alert \
+            --type=budget_pause \
+            --workflow=content_pixelmatch \
+            --severity=warning \
+            --subject="[pixelmatch] daily cron paused — monthly budget at ${{ steps.budget.outputs.percent }}" \
+            --message="month-to-date spend ${{ steps.budget.outputs.spent }} of ${{ steps.budget.outputs.budget }}. Daily cron skipped. Resumes automatically on month rollover."
+
+      - name: Alert on budget warn / limit_extras
+        if: steps.budget.outputs.action == 'warn' || steps.budget.outputs.action == 'limit_extras'
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+        run: |
+          python -m src.utils.send_alert \
+            --type=budget_warning \
+            --workflow=content_pixelmatch \
+            --severity=info \
+            --subject="[pixelmatch] budget ${{ steps.budget.outputs.action }} — ${{ steps.budget.outputs.spent }} of ${{ steps.budget.outputs.budget }}" \
+            --message="action=${{ steps.budget.outputs.action }}. Core daily article will still be produced; maintenance tasks may be skipped if limit_extras."
+
+      # ---------------------------------------------------------------- 1.
+      # GA4 + GSC daily collectors. run_collectors iterates EVERY active
+      # site in the DB; both ntecodex and pixelmatch will be covered when
+      # either workflow runs. Per-site credentials resolve via
+      # src.collectors.base.site_env_prefix() — reads sites.config.site_slug
+      # (= "pixelmatch") and looks for env PIXELMATCH_GA4_PROPERTY_ID.
+      - name: Collect yesterday's GA4 + GSC metrics
+        if: steps.budget.outputs.action != 'pause_all'
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+          # Both sites' GA4 property IDs are exposed so run_collectors
+          # can fetch metrics for whichever tenant it's processing.
+          NTECODEX_GA4_PROPERTY_ID: ${{ secrets.NTECODEX_GA4_PROPERTY_ID }}
+          PIXELMATCH_GA4_PROPERTY_ID: ${{ secrets.PIXELMATCH_GA4_PROPERTY_ID }}
+        run: python -m scripts.run_collectors
+
+      # ---------------------------------------------------------------- 2.
+      # Keyword pool top-up + auto-balance starved article types.
       - name: Garden the keyword pool
         if: steps.budget.outputs.action != 'pause_all'
         env:
@@ -100,9 +153,16 @@ jobs:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          python -m scripts.keyword_gardener --min-planned 20 --target 12
+          if [ "${{ steps.budget.outputs.action }}" = "limit_extras" ]; then
+            python -m scripts.keyword_gardener --min-planned 20 --target 12
+          else
+            python -m scripts.keyword_gardener --min-planned 20 --target 12 \
+              --auto-balance-types
+          fi
 
-      # ── 2. Generate articles ────────────────────────────────────────
+      # ---------------------------------------------------------------- 3.
+      # Article generation — slow-start: 3 articles per cron × 2 crons/day
+      # = ~6 articles/day. Bump to batch=4 + 24 cron/day when ramping.
       - name: Generate articles (batch=3)
         if: steps.budget.outputs.action != 'pause_all'
         env:
@@ -112,7 +172,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python -m scripts.run_batch_smoke --count 3 --max-retries 1
 
-      # ── 3. Publish article markdown ─────────────────────────────────
+      # ---------------------------------------------------------------- 4.
       - name: Publish article markdown to pixelmatch-site
         if: steps.budget.outputs.action != 'pause_all'
         env:
@@ -123,8 +183,8 @@ jobs:
           SITE_REPO_PATH: ${{ github.workspace }}/pixelmatch-site
         run: python -m scripts.publish_articles
 
-      # ── 4. Images ───────────────────────────────────────────────────
-      - name: Install Pillow
+      # ---------------------------------------------------------------- 5.
+      - name: Install Pillow (image processing)
         if: steps.budget.outputs.action != 'pause_all'
         run: pip install --quiet Pillow
 
@@ -139,7 +199,43 @@ jobs:
         run: |
           python -m scripts.run_image_for_articles --new-only --inline 6 --budget-usd 0.50
 
-      # ── 5. Commit + push back to site repo (P0 fix, mandatory) ──────
+      # ---------------------------------------------------------------- 5b.
+      # Backfill the OLDEST article that has fewer than 4 inline images.
+      - name: Backfill 1 under-imaged article
+        if: steps.budget.outputs.action == 'normal' || steps.budget.outputs.action == 'warn'
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SITE_REPO_PATH: ${{ github.workspace }}/pixelmatch-site
+        run: |
+          python -m scripts.backfill_one_under_imaged --budget-usd 0.40
+
+      # ---------------------------------------------------------------- 5c.
+      # GSC feedback loop: rewrite ONE page-2 article per day.
+      - name: Rewrite 1 page-2 article (GSC feedback loop)
+        if: steps.budget.outputs.action == 'normal' || steps.budget.outputs.action == 'warn'
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+          SITE_REPO_PATH: ${{ github.workspace }}/pixelmatch-site
+        run: |
+          python -m scripts.rewrite_one_article --budget-usd 1.00
+
+      # ---------------------------------------------------------------- 6.
+      # P0 FIX: commit + push the generated content back to the site repo
+      # BEFORE wrangler deploy. See content_daily.yml for the full
+      # rationale (workspace ephemerality / sitemap drift).
       - name: Commit + push generated content back to site repo
         if: steps.budget.outputs.action != 'pause_all'
         working-directory: pixelmatch-site
@@ -156,29 +252,30 @@ jobs:
           until git push origin HEAD:main; do
             attempt=$((attempt + 1))
             if [ "$attempt" -ge 3 ]; then
-              echo "❌ push failed after 3 attempts"; exit 1
+              echo "❌ push failed after 3 attempts"
+              exit 1
             fi
             echo "⚠️  push race lost (attempt $attempt) — rebasing"
             git pull --rebase origin main
           done
           echo "✓ pushed content batch to pixelmatch-site"
 
-      # ── 6. Build + deploy ───────────────────────────────────────────
+      # ---------------------------------------------------------------- 7.
       - name: Setup Node 22
-        if: steps.budget.outputs.action != 'pause_all'
+        if: env.skip_deploy != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
       - name: Build Astro site
-        if: steps.budget.outputs.action != 'pause_all'
+        if: env.skip_deploy != 'true'
         working-directory: pixelmatch-site
         run: |
           npm install
           npm run build
 
       - name: Deploy to Cloudflare Pages
-        if: steps.budget.outputs.action != 'pause_all'
+        if: env.skip_deploy != 'true'
         working-directory: pixelmatch-site
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -187,8 +284,39 @@ jobs:
           npx --yes wrangler@latest pages deploy dist \
             --project-name pixelmatch-blog --branch main --commit-dirty=true
 
-      # ── 7. Maintenance tail ─────────────────────────────────────────
-      - name: Finalize stuck articles
+      # ---------------------------------------------------------------- 8.
+      # GSC traction signals: stagnation + positive-signal alerts.
+      - name: GSC traction signals (stagnation + positive)
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+        run: python -m src.maintenance.gsc_signal_check
+
+      # ---------------------------------------------------------------- 9.
+      - name: Velocity check (3-day pass-rate band)
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+        run: python -m src.maintenance.velocity_check
+
+      # ---------------------------------------------------------------- 10.
+      - name: Finalize stuck articles (auto-resolve mid-pipeline stalls)
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -196,6 +324,21 @@ jobs:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: python -m scripts.finalize_stuck_articles
 
+      # ---------------------------------------------------------------- 11.
+      - name: Mobile responsiveness check
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+        run: python -m scripts.check_mobile_responsive
+
+      # ---------------------------------------------------------------- 12.
       - name: Notify on failure
         if: failure()
         env:
@@ -210,4 +353,5 @@ jobs:
             --workflow=content_pixelmatch \
             --severity=critical \
             --subject="Content Pipeline (pixelmatch.art) failed" \
-            --message="Run ${{ github.run_id }} failed. Check ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            --message="Run ${{ github.run_id }} on ${{ github.repository }} failed.
+          Check logs at ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

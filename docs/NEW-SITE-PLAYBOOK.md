@@ -1,5 +1,9 @@
 # New-Site Bootstrap Playbook
 
+**Standard template**: `.github/workflows/content_daily.yml` (ntecodex)
+is the canonical workflow shape. Any new site copies this file, swaps
+~5 things, never re-authors the body.
+
 **Goal**: compress the "add a second site to the AI Site Operator
 pipeline" workflow from ~2 days of debugging into a 30-minute checklist.
 
@@ -146,9 +150,23 @@ otherwise. **Required step** before flipping the cron switch.
 - [ ] AdSense `<Advertisement>` slot detected in DOM
 
 ### Phase 7 · GitHub Actions (5 min)
-- [ ] Add secret `<NEW>_SITE_REPO_PAT` (fine-grained PAT, contents:write on the new site repo)
-- [ ] Copy `.github/workflows/content_pixelmatch.yml` → `content_<new>.yml`, edit env + repo path
-- [ ] Test with `gh workflow run content_<new>.yml`
+
+**Use `content_daily.yml` (ntecodex) as the canonical template,** not
+`content_pixelmatch.yml` — both have identical step counts (25), but
+ntecodex is the proven-in-prod template with 60+ successful runs.
+
+- [ ] Add secrets:
+  - `<NEW>_SITE_REPO_PAT` — fine-grained PAT, contents:write on the new site repo
+  - `<NEW>_GA4_PROPERTY_ID` — for the GA4 collector (read via `site_env_prefix()`)
+  - `<NEW>_GA4_MEASUREMENT_ID` — for GA4 client-side tracking on the site
+- [ ] Copy `.github/workflows/content_daily.yml` → `content_<new>.yml`
+- [ ] In the new file, change ONLY these markers:
+  1. `env.SITE_DOMAIN: <new>.com`
+  2. All occurrences of `ntecodex-site` → `<new>-site`
+  3. `--project-name ntecodex` → `--project-name <new>-blog` (CF Pages)
+  4. `NTECODEX_*` secret refs → also include `<NEW>_*` (don't remove ntecodex's — `run_collectors` iterates every active site and needs every site's env)
+  5. Schedule block — start with 2 crons/day (`0 3 * * *` + `0 15 * * *`), expand later
+- [ ] Test: `gh workflow run content_<new>.yml`
 
 ### Phase 8 · AdSense (variable, 1-14 days for review)
 - [ ] After ~10-20 articles, log into AdSense → Sites → Add `blog.<new>.com`

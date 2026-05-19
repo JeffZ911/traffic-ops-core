@@ -161,13 +161,14 @@ def main() -> int:
         print(f"❌ site repo not found at {SITE_REPO}")
         return 2
 
+    site_domain = os.getenv("SITE_DOMAIN", "ntecodex.com")
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "select id from sites where domain = 'ntecodex.com' limit 1"
+            "select id from sites where domain = %s limit 1", (site_domain,)
         )
         site_row = cur.fetchone()
         if not site_row:
-            print("❌ ntecodex.com site not found")
+            print(f"❌ site {site_domain!r} not found in sites table")
             return 2
         site_id = site_row[0]
 

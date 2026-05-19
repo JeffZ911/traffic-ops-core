@@ -37,7 +37,6 @@ from src.utils.send_alert import send_alert
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 
-SITE_BASE = "https://ntecodex.com"
 LONG_TOKEN_THRESHOLD = 40   # chars without whitespace; matches typical
                             # Vertex grounding URL prefixes
 
@@ -109,12 +108,22 @@ def main() -> int:
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args()
 
+    import os
+    site_domain = os.getenv("SITE_DOMAIN", "ntecodex.com")
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "select id from sites where domain='ntecodex.com' limit 1"
+            "select id from sites where domain = %s limit 1", (site_domain,)
         )
-        site_id = str(cur.fetchone()[0])
+        row = cur.fetchone()
+        if not row:
+            print(f"  ⚠️  site {site_domain!r} not found; skip")
+            return 0
+        site_id = str(row[0])
         articles = _list_today_articles(cur, site_id)
+    # Site-relative URLs (/learn/…/) get prefixed with https://<domain>
+    # so curl can fetch the rendered page. Skip the /blog prefix —
+    # pixelmatch's _redirects rewrite resolves /blog/* anyway.
+    SITE_BASE = f"https://{site_domain}"
 
     if not articles:
         print(f"  no published articles today — skip")

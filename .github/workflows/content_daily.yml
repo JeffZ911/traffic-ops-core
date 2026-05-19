@@ -151,7 +151,12 @@ jobs:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
           GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+          # run_collectors iterates EVERY active site in the DB; expose
+          # every tenant's GA4 property here so the iteration finds the
+          # right env var via site_env_prefix(). Missing secrets fall
+          # through to skip-with-warn; they don't fail the run.
           NTECODEX_GA4_PROPERTY_ID: ${{ secrets.NTECODEX_GA4_PROPERTY_ID }}
+          PIXELMATCH_GA4_PROPERTY_ID: ${{ secrets.PIXELMATCH_GA4_PROPERTY_ID }}
         run: python -m scripts.run_collectors
 
       # ---------------------------------------------------------------- 2.

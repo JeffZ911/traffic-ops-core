@@ -163,9 +163,18 @@ def main() -> int:
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args()
 
+    # Multi-tenant: SITE_DOMAIN env (default ntecodex.com) routes to the
+    # right tenant. Same convention as scripts/publish_articles.py and
+    # the other pipeline scripts.
+    import os
+    site_domain = os.getenv("SITE_DOMAIN", "ntecodex.com")
     with get_db_connection() as conn, conn.cursor() as cur:
-        cur.execute("select id from sites where domain='ntecodex.com' limit 1")
-        site_id = str(cur.fetchone()[0])
+        cur.execute("select id from sites where domain = %s limit 1", (site_domain,))
+        row = cur.fetchone()
+        if not row:
+            print(f"  ⚠️  site {site_domain!r} not found; skip checks")
+            return 0
+        site_id = str(row[0])
 
     data = _fetch_last_n_days(site_id)
     if "error" in data:
