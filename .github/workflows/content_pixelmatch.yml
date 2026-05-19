@@ -267,6 +267,22 @@ jobs:
         with:
           node-version: '22'
 
+      # Inject per-site PUBLIC_* env vars into pixelmatch-site/.env.local
+      # so Astro picks them up at build time. Mirrors the ntecodex
+      # workflow step. See scripts/inject_site_env.py for the lookup
+      # order — sites.config first, env fallback.
+      - name: Inject per-site tracking IDs into Astro env
+        if: env.skip_deploy != 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          # Provide env fallbacks too; DB still wins when present.
+          PIXELMATCH_GA4_MEASUREMENT_ID: ${{ secrets.PIXELMATCH_GA4_MEASUREMENT_ID }}
+          PIXELMATCH_ADSENSE_PUBLISHER_ID: ${{ secrets.PIXELMATCH_ADSENSE_PUBLISHER_ID }}
+          SITE_REPO_PATH: ${{ github.workspace }}/pixelmatch-site
+        run: python -m scripts.inject_site_env
+
       - name: Build Astro site
         if: env.skip_deploy != 'true'
         working-directory: pixelmatch-site
