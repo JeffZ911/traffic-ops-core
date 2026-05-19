@@ -60,14 +60,17 @@ URL_BY_TYPE: dict[str, str] = {
     "faq":            "/faq",         # aggregated page
     # ── ecommerce ──────────────────────────────────────────────────
     # All ecommerce articles live under /blog/<type>/<slug> on the
-    # canonical domain — see PIXELMATCH-STRATEGY §2. The /blog prefix
-    # is materialized at Astro-build time via `base: '/blog'` in
-    # astro.config.mjs of pixelmatch-site, so we DON'T duplicate it
-    # in the published_url here.
-    "tool_guide":     "/learn/{slug}",
-    "vs_comparison":  "/compare/{slug}",
-    "use_case":       "/stories/{slug}",
-    "policy_guide":   "/policy/{slug}",
+    # canonical domain (pixelmatch.art/blog/...). The /blog prefix is
+    # INCLUDED here so the published_url written into the articles
+    # table — and propagated to listing cards, sitemaps, and external
+    # references — matches the canonical URL emitted by Astro's
+    # `base: '/blog'`. Without the prefix, cards linked to /learn/...
+    # while the canonical was /blog/learn/..., creating inconsistent
+    # internal navigation (Phase 1B UX audit, 2026-05-19).
+    "tool_guide":     "/blog/learn/{slug}",
+    "vs_comparison":  "/blog/compare/{slug}",
+    "use_case":       "/blog/stories/{slug}",
+    "policy_guide":   "/blog/policy/{slug}",
 }
 
 
