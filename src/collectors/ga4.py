@@ -33,11 +33,23 @@ class GA4Daily:
 
 
 def _property_id_for(site_id: UUID) -> str:
-    prefix = site_env_prefix(site_id)
-    env_key = f"{prefix}_GA4_PROPERTY_ID"
-    val = os.getenv(env_key)
+    """Look up GA4 property ID for this site.
+
+    Two-tier resolution via base.get_site_value():
+      1. sites.config.ga4_property_id  (Dashboard-editable, takes
+         effect on the next collector run — no GitHub-secret edit
+         needed)
+      2. <SLUG>_GA4_PROPERTY_ID env var  (legacy fallback)
+    """
+    from src.collectors.base import get_site_value
+    val = get_site_value(site_id, "ga4_property_id")
     if not val:
-        raise RuntimeError(f"{env_key} not set in env")
+        prefix = site_env_prefix(site_id)
+        raise RuntimeError(
+            f"GA4 property id missing for site {site_id} — neither "
+            f"sites.config.ga4_property_id nor env "
+            f"{prefix}_GA4_PROPERTY_ID is set"
+        )
     return val
 
 

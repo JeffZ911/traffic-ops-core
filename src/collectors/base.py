@@ -46,3 +46,31 @@ def site_env_prefix(site_id: UUID) -> str:
     if not slug:
         raise RuntimeError(f"sites.config.site_slug missing for {site_id}")
     return slug.upper().replace("-", "_")
+
+
+def get_site_value(site_id: UUID, key: str) -> str | None:
+    """Generic per-site value lookup with two-tier fallback.
+
+    Resolution order (matches the Dashboard's "edit it inline" UX):
+      1. ``sites.config.<key>`` — operator can edit via /sites page,
+         takes effect immediately on the next request.
+      2. ``<SLUG>_<KEY_UPPER>`` env var — legacy GitHub-secret path,
+         for values that genuinely must stay outside the DB.
+
+    Returns None when neither source has the value, so callers can
+    decide whether that's fatal or skippable.
+
+    Example:
+        prop = get_site_value(site_id, "ga4_property_id")
+        # → sites.config.ga4_property_id, else env NTECODEX_GA4_PROPERTY_ID
+    """
+    import os
+    cfg = site_config(site_id)
+    db_val = cfg.get(key)
+    if db_val:
+        return str(db_val)
+    slug = cfg.get("site_slug") or ""
+    if not slug:
+        return None
+    env_key = f"{slug.upper().replace('-', '_')}_{key.upper()}"
+    return os.getenv(env_key) or None
