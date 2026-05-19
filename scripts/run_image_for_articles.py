@@ -46,18 +46,14 @@ def _site_repo_path() -> Path:
 SITE_REPO = _site_repo_path()
 
 
-# article_type → relative content path (mirrors PublishAgent.PATH_BY_TYPE)
-PATH_BY_TYPE: dict[str, str] = {
-    "build":        "guides/{slug}.md",
-    "comparison":   "guides/{slug}.md",
-    "boss_guide":   "boss/{slug}.md",
-    "reroll":       "guides/reroll/{slug}.md",
-    "character_db": "characters/{slug}.md",
-    "weapon_db":    "weapons/{slug}.md",
-    "news":         "news/{slug}.md",
-    "tier_list":    "tier-list-source/{slug}.md",
-    "faq":          "faq-source/{slug}.md",
-}
+# article_type → relative content path. Single source of truth lives in
+# src.agents.publish.PATH_BY_TYPE (kept in sync there for both gaming
+# and ecommerce niches). Phase 1B 2026-05-14: importing instead of
+# maintaining a second copy — the local copy was missing the four
+# ecommerce types (tool_guide / vs_comparison / use_case / policy_guide),
+# so this script silently no-op'd on those — images generated on disk
+# but never injected into the MD frontmatter or body.
+from src.agents.publish import PATH_BY_TYPE
 
 
 def _patch_frontmatter(
