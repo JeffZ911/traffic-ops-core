@@ -359,6 +359,38 @@ jobs:
           npx --yes wrangler@latest pages deploy dist \
             --project-name ntecodex --branch main --commit-dirty=true
 
+      # ---------------------------------------------------------------- 7b.
+      # Re-submit the sitemap to GSC after every content batch so Google
+      # re-downloads the latest URL set instead of sitting on a stale
+      # snapshot for weeks. This is THE legitimate "make Google
+      # re-discover content" API lever (the old ping endpoint is dead,
+      # URL Inspection is read-only, Indexing API is JobPosting-only).
+      # Needs WRITE OAuth scope; if the token is still readonly this
+      # step just logs a 403 and continues (continue-on-error).
+      - name: Re-submit sitemap to GSC
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+        run: python -m scripts.resubmit_sitemap --site ntecodex.com
+
+      # ---------------------------------------------------------------- 7c.
+      # Gray-area accelerator: nudge today's + clean-tier + unknown URLs
+      # via the Indexing API. Skips cleanly if no service account is
+      # configured. Sitemap (above) + internal links are the primary
+      # levers; this is best-effort on top.
+      - name: Request indexing (Indexing API, best-effort)
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.NTECODEX_GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: python -m scripts.request_indexing --site ntecodex.com --limit 150
+
       # ---------------------------------------------------------------- 8.
       # Zero-published streak check. If three days in a row produce no
       # `status='published'` article, fire a warning email so the

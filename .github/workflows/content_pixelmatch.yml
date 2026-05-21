@@ -300,6 +300,29 @@ jobs:
           npx --yes wrangler@latest pages deploy dist \
             --project-name pixelmatch-blog --branch main --commit-dirty=true
 
+      # ---------------------------------------------------------------- 7b.
+      # Re-submit sitemap to GSC (see content_daily.yml for rationale).
+      - name: Re-submit sitemap to GSC
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+        run: python -m scripts.resubmit_sitemap --site pixelmatch.art
+
+      # ---------------------------------------------------------------- 7c.
+      # Gray-area accelerator (see content_daily.yml). Skips without SA.
+      - name: Request indexing (Indexing API, best-effort)
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.PIXELMATCH_GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: python -m scripts.request_indexing --site pixelmatch.art --limit 50
+
       # ---------------------------------------------------------------- 8.
       # GSC traction signals: stagnation + positive-signal alerts.
       - name: GSC traction signals (stagnation + positive)

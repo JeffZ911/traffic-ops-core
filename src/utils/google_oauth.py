@@ -29,10 +29,22 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 
 
-# Default scopes our collectors need
+# Default scopes for the COLLECTORS (read-only). The existing refresh
+# token is bound to this exact set — do not broaden it here or token
+# refresh fails with invalid_scope.
 DEFAULT_SCOPES: Sequence[str] = (
     "https://www.googleapis.com/auth/analytics.readonly",
     "https://www.googleapis.com/auth/webmasters.readonly",
+)
+
+# Write scope needed for sitemaps.submit (scripts/resubmit_sitemap.py).
+# Re-run scripts.oauth_setup with WRITE_SCOPES to mint a token that can
+# both read (collectors) and submit sitemaps. Until then the existing
+# readonly token keeps the collectors working; only the sitemap-submit
+# call 403s.
+WRITE_SCOPES: Sequence[str] = (
+    "https://www.googleapis.com/auth/analytics.readonly",
+    "https://www.googleapis.com/auth/webmasters",
 )
 
 

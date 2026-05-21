@@ -30,7 +30,11 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from src.utils.google_oauth import DEFAULT_SCOPES
+# WRITE_SCOPES includes webmasters (full) so the minted token can
+# submit sitemaps (scripts/resubmit_sitemap.py) in addition to all the
+# read-only collector calls. Re-running this script upgrades a readonly
+# token to read+write.
+from src.utils.google_oauth import WRITE_SCOPES as DEFAULT_SCOPES
 
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
