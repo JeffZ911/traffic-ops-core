@@ -391,6 +391,18 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.NTECODEX_GOOGLE_SERVICE_ACCOUNT_JSON }}
         run: python -m scripts.request_indexing --site ntecodex.com --limit 150
 
+      # ---------------------------------------------------------------- 7d.
+      # IndexNow push — Bing/Yandex/DuckDuckGo/ChatGPT-Search discovery.
+      # Google ignores it (harmless); Bing fetches fast. Submits today's
+      # new URLs. No OAuth needed — auth is the hosted key file.
+      - name: IndexNow submit (Bing/Yandex)
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: python -m scripts.indexnow_submit --site ntecodex.com
+
       # ---------------------------------------------------------------- 8.
       # Zero-published streak check. If three days in a row produce no
       # `status='published'` article, fire a warning email so the

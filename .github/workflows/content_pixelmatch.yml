@@ -323,6 +323,16 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.PIXELMATCH_GOOGLE_SERVICE_ACCOUNT_JSON }}
         run: python -m scripts.request_indexing --site pixelmatch.art --limit 50
 
+      # ---------------------------------------------------------------- 7d.
+      # IndexNow push (see content_daily.yml). Bing/Yandex/DuckDuckGo.
+      - name: IndexNow submit (Bing/Yandex)
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: python -m scripts.indexnow_submit --site pixelmatch.art
+
       # ---------------------------------------------------------------- 8.
       # GSC traction signals: stagnation + positive-signal alerts.
       - name: GSC traction signals (stagnation + positive)
