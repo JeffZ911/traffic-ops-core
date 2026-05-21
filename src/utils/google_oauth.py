@@ -29,23 +29,28 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 
 
-# Default scopes for the COLLECTORS (read-only). The existing refresh
-# token is bound to this exact set — do not broaden it here or token
-# refresh fails with invalid_scope.
+# Unified scope set (2026-05-21). Now that the refresh token is minted
+# with webmasters (full) write scope, every caller requests the same
+# set — no more readonly/write split that caused invalid_scope on
+# refresh when the two diverged.
+#
+#   - analytics.readonly : GA4 collector (read-only is all GA4 needs)
+#   - webmasters (FULL)  : GSC read (searchanalytics, urlInspection,
+#                          sitemaps.list) AND write (sitemaps.submit).
+#                          Full scope is a superset of .readonly, so
+#                          collectors keep working unchanged.
+#
+# The token's granted scopes MUST match this set. After changing this,
+# re-run `python -m scripts.oauth_setup` and update
+# GOOGLE_OAUTH_REFRESH_TOKEN everywhere (.env + GitHub Secret).
 DEFAULT_SCOPES: Sequence[str] = (
-    "https://www.googleapis.com/auth/analytics.readonly",
-    "https://www.googleapis.com/auth/webmasters.readonly",
-)
-
-# Write scope needed for sitemaps.submit (scripts/resubmit_sitemap.py).
-# Re-run scripts.oauth_setup with WRITE_SCOPES to mint a token that can
-# both read (collectors) and submit sitemaps. Until then the existing
-# readonly token keeps the collectors working; only the sitemap-submit
-# call 403s.
-WRITE_SCOPES: Sequence[str] = (
     "https://www.googleapis.com/auth/analytics.readonly",
     "https://www.googleapis.com/auth/webmasters",
 )
+
+# Backward-compat alias — several scripts import WRITE_SCOPES explicitly.
+# Now identical to DEFAULT_SCOPES since the split is gone.
+WRITE_SCOPES: Sequence[str] = DEFAULT_SCOPES
 
 
 def _load_client_secret() -> dict:

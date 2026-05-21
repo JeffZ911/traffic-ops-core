@@ -60,12 +60,12 @@ def _gsc_property_for(domain: str) -> str:
 def resubmit(domain: str, config: dict) -> int:
     from googleapiclient.discovery import build
     from googleapiclient.errors import HttpError
-    from src.utils.google_oauth import get_user_credentials
+    from src.utils.google_oauth import get_user_credentials, WRITE_SCOPES
 
     sitemap_url = _sitemap_url_for(domain, config)
     prop = _gsc_property_for(domain)
 
-    creds = get_user_credentials()
+    creds = get_user_credentials(scopes=WRITE_SCOPES)
     svc = build("searchconsole", "v1", credentials=creds, cache_discovery=False)
 
     # Submit (idempotent — re-submitting an existing sitemap just bumps
