@@ -132,6 +132,60 @@ def check_gsc_access(domain: str) -> bool:
         return False
 
 
+def check_indexing_stagnation(domain: str) -> None:
+    """Day-7 stagnation alert. daily_indexing_worklist records an
+    indexing_coverage payload each day. If we have ≥7 distinct days of data
+    and the latest indexed ratio is still ~0%, the sitemap fix likely didn't
+    take — open a diagnose card. Otherwise (rising, or too few days) clear it.
+    """
+    title = f"Indexing still ~0% after 7+ days — {domain}"
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            select metric_date,
+                   (payload->'indexing_coverage'->>'ratio')::float as ratio
+              from metrics_raw
+             where site_id = (select id from sites where domain=%s)
+               and source = 'gsc'
+               and payload ? 'indexing_coverage'
+               and metric_date >= current_date - 21
+             order by metric_date desc
+            """,
+            (domain,),
+        )
+        rows = cur.fetchall()
+
+    # Dedupe to the latest ratio per day (worklist can run more than once).
+    by_day: dict = {}
+    for d, r in rows:
+        if d not in by_day:
+            by_day[d] = r
+    days = sorted(by_day.keys(), reverse=True)
+
+    if len(days) < 7:
+        # Not enough history yet — never alarm, and clear any stale card.
+        resolve_open_task(title, site_domain=domain)
+        return
+
+    latest_ratio = by_day[days[0]] or 0.0
+    first_day = sorted(by_day.keys())[0]
+    if latest_ratio >= 0.02:  # any real movement off zero → healthy enough
+        resolve_open_task(title, site_domain=domain)
+        return
+
+    upsert_open_task(
+        title,
+        f"sitemap 修复可能没生效, 需诊断 — {len(days)} days of indexing "
+        f"samples since {first_day}, latest still {latest_ratio:.0%} indexed.\n"
+        f"HOW: 1) GSC → Pages report: are URLs 'Discovered – not indexed' or "
+        f"'Crawled – not indexed'? 2) Re-run sitemap resubmit + confirm GSC "
+        f"shows the new URL count. 3) urlInspection a known-good URL — does "
+        f"'Live test' pass? 4) Check robots.txt / canonical aren't blocking. "
+        f"5) If all clean, it may just need more time (young domain).",
+        priority="high", category="seo", site_domain=domain,
+    )
+
+
 def check_oauth() -> None:
     title = "OAuth token refresh failing"
     try:
@@ -163,6 +217,7 @@ def main() -> int:
         check_budget(domain, cfg)
         check_zero_published(domain)
         check_gsc_access(domain)
+        check_indexing_stagnation(domain)
         print(f"  ✓ auto-flag checks done for {domain}")
 
     # Summarize current open auto cards.

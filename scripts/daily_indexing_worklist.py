@@ -38,6 +38,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from src.db.client import get_db_connection
+from src.collectors.base import store_raw
 from src.utils.ops_tasks import upsert_open_task, resolve_open_task
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -142,6 +143,25 @@ def main() -> int:
     ratio = indexed / inspected if inspected else 0.0
     print(f"📋 {args.site}: inspected {inspected}, indexed {indexed} ({ratio:.0%}), "
           f"{len(unknown_urls)} need attention")
+
+    # ── Record today's indexed-% so /viability can chart the trend and
+    # ops_autoflag can detect Day-7 stagnation. Stored under source='gsc'
+    # (this IS GSC URL-Inspection data; the source CHECK constraint forbids
+    # a new value, so we tag it with a distinct payload key instead — no
+    # schema change). Append-only; the readers dedupe to one point/day.
+    from datetime import date as _date
+    if inspected > 0:
+        store_raw(
+            site_id, "gsc", _date.today(),
+            {"indexing_coverage": {
+                "inspected": inspected,
+                "indexed": indexed,
+                "ratio": round(ratio, 4),
+                "unknown": len(unknown_urls),
+                "date": _date.today().isoformat(),
+            }},
+        )
+        print(f"  ↳ recorded indexing_coverage to metrics_raw")
 
     worklist_title = f"Daily GSC request-indexing — {args.site}"
     stop_title = f"GSC indexing healthy (>80%) — {args.site}: stop manual requests"
