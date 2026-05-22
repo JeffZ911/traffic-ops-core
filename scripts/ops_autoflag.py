@@ -1,0 +1,176 @@
+"""Auto-flag human-action items into ops_tasks when the pipeline detects
+a condition only a human can fix — and auto-resolve them when cleared.
+
+Runs once per cron (cheap, all DB/GSC reads). Each check is paired:
+  - condition true  → upsert_open_task (idempotent, no dup spam)
+  - condition false → resolve_open_task (auto-marks done)
+
+Checks:
+  1. GA4 property_id missing in sites.config        → card (per site)
+  2. GSC property not accessible (sitemaps.list 403) → card (per site)
+  3. OAuth token refresh failing                     → card (global)
+  4. Budget > 80% of monthly cap                     → card (per site)
+  5. ≥3 consecutive days with 0 published            → card (per site)
+
+Usage:
+  python -m scripts.ops_autoflag            # all active sites
+  python -m scripts.ops_autoflag --site ntecodex.com
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from datetime import date, timedelta
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+from src.db.client import get_db_connection
+from src.utils.ops_tasks import upsert_open_task, resolve_open_task
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+
+def _active_sites(site_filter: str | None):
+    with get_db_connection() as conn, conn.cursor() as cur:
+        if site_filter:
+            cur.execute("select domain, config from sites where domain=%s", (site_filter,))
+        else:
+            cur.execute("select domain, config from sites where status='active' order by domain")
+        return cur.fetchall()
+
+
+def check_ga4(domain: str, cfg: dict) -> None:
+    title = f"Fill GA4 Property ID — {domain}"
+    if cfg.get("ga4_property_id"):
+        resolve_open_task(title, site_domain=domain)
+        return
+    upsert_open_task(
+        title,
+        "Metrics collector can't fetch GA4 without the numeric Property ID.\n"
+        "HOW: analytics.google.com → Admin → property → Property Settings → "
+        "copy 'Property ID' (9-10 digit) → Dashboard /sites → this site's "
+        "'GA4 property ID' field → Save.",
+        priority="high", category="new-site", site_domain=domain,
+    )
+
+
+def check_budget(domain: str, cfg: dict) -> None:
+    title = f"Budget >80% — {domain}"
+    cap = float(cfg.get("monthly_budget_usd") or 0)
+    if cap <= 0:
+        return
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select coalesce(sum(cost_usd),0) from agent_runs "
+            "where site_id=(select id from sites where domain=%s) "
+            "and created_at >= date_trunc('month', now())",
+            (domain,),
+        )
+        spent = float(cur.fetchone()[0] or 0)
+    pct = spent / cap if cap else 0
+    if pct < 0.80:
+        resolve_open_task(title, site_domain=domain)
+        return
+    upsert_open_task(
+        title,
+        f"Month-to-date spend ${spent:.2f} of ${cap:.0f} ({pct:.0%}). The "
+        f"budget guard will pause content at 95%. Decide: raise "
+        f"sites.config.monthly_budget_usd, or let it coast to month rollover.",
+        priority="high", category="billing", site_domain=domain,
+    )
+
+
+def check_zero_published(domain: str) -> None:
+    title = f"3+ days with 0 published — {domain}"
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select count(*) from articles "
+            "where site_id=(select id from sites where domain=%s) "
+            "and status='published' and published_at >= %s",
+            (domain, (date.today() - timedelta(days=3)).isoformat()),
+        )
+        recent = cur.fetchone()[0]
+    if recent > 0:
+        resolve_open_task(title, site_domain=domain)
+        return
+    upsert_open_task(
+        title,
+        "No articles published in the last 3 days. Check: cron runs green? "
+        "keyword pool not exhausted? QA pass-rate collapse? Look at the "
+        "Cron health table on Mission Control + recent agent_runs errors.",
+        priority="high", category="infra", site_domain=domain,
+    )
+
+
+def check_gsc_access(domain: str) -> bool:
+    """Return True if GSC property is accessible. Opens/clears a card."""
+    title = f"Verify GSC property — {domain}"
+    try:
+        from googleapiclient.discovery import build
+        from googleapiclient.errors import HttpError
+        from src.utils.google_oauth import get_user_credentials
+        svc = build("searchconsole", "v1", credentials=get_user_credentials(), cache_discovery=False)
+        try:
+            svc.sitemaps().list(siteUrl=f"sc-domain:{domain}").execute()
+            resolve_open_task(title, site_domain=domain)
+            return True
+        except HttpError as e:
+            if e.resp.status in (403, 404):
+                upsert_open_task(
+                    title,
+                    f"GSC can't access sc-domain:{domain} ({e.resp.status}). "
+                    f"HOW: search.google.com/search-console → add domain "
+                    f"property {domain} → verify via DNS TXT → ensure the "
+                    f"OAuth Google account is listed as Owner.",
+                    priority="high", category="new-site", site_domain=domain,
+                )
+            return False
+    except Exception:
+        return False
+
+
+def check_oauth() -> None:
+    title = "OAuth token refresh failing"
+    try:
+        from src.utils.google_oauth import get_user_credentials
+        get_user_credentials()  # raises on bad/expired refresh token
+        resolve_open_task(title)
+    except Exception as e:  # noqa: BLE001
+        upsert_open_task(
+            title,
+            f"GSC/GA4 OAuth refresh failed: {type(e).__name__}. All collectors "
+            f"+ sitemap resubmit will fail until fixed.\nHOW: re-run "
+            f"`python -m scripts.oauth_setup`, update GOOGLE_OAUTH_REFRESH_TOKEN "
+            f"in .env AND GitHub Secret.",
+            priority="high", category="infra", site_domain=None,
+        )
+
+
+def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("--site", default=None)
+    args = p.parse_args()
+
+    check_oauth()  # global, once
+
+    sites = _active_sites(args.site)
+    for domain, config in sites:
+        cfg = config or {}
+        check_ga4(domain, cfg)
+        check_budget(domain, cfg)
+        check_zero_published(domain)
+        check_gsc_access(domain)
+        print(f"  ✓ auto-flag checks done for {domain}")
+
+    # Summarize current open auto cards.
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute("select count(*) from ops_tasks where status='open' and source='auto'")
+        print(f"  open auto-flagged tasks: {cur.fetchone()[0]}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
