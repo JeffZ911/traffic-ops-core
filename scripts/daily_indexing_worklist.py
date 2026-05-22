@@ -45,7 +45,10 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 INDEXED_STATES = {"Submitted and indexed", "Indexed, not submitted in sitemap"}
 STOP_THRESHOLD = 0.80
-DAILY_REQUEST_CAP = 10
+# GSC's real per-property quota is ~10-12 request-indexing clicks/day and it
+# is not stable — hitting it mid-list strands the rest. Cap the daily card at
+# 8 so the operator can always finish the whole list without getting blocked.
+DAILY_REQUEST_CAP = 8
 
 
 def _public_url(domain: str, published_url: str, niche: str) -> str:
@@ -189,7 +192,9 @@ def main() -> int:
     numbered = "\n".join(f"  {i+1}. {u}" for i, u in enumerate(top))
     detail = (
         f"{len(top)} URLs Google hasn't indexed yet (inspected sample: "
-        f"{ratio:.0%} indexed). GSC allows ~10 manual requests/day per property.\n\n"
+        f"{ratio:.0%} indexed).\n"
+        f"GSC 每天配额约 10-12 个/property, 做完这 {len(top)} 个即可, "
+        f"明天继续剩余的。\n\n"
         f"HOW: open search.google.com/search-console → select {args.site} → "
         f"paste each URL in the top search bar → wait for inspection → click "
         f"'Request Indexing'. Then mark this card Done.\n\n"
