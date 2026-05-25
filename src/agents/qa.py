@@ -305,6 +305,19 @@ class QAAgent(BaseAgent):
             tier = "strong"
         else:
             tier = "reject"
+
+        # HARD GATE (restored 2026-05-25): factual_accuracy=0 means the article
+        # contains fabricated proper nouns — it is factually FALSE content. No
+        # amount of good structure/SEO/AI-pattern should let it publish (the
+        # old soft -2.0 penalty let high-base-score fabrications ship as
+        # 'strong', e.g. a fabricated brand-new gacha character). False content
+        # never ships, regardless of total score.
+        if fa == 0.0 and fab_count >= 1:
+            tier = "reject"
+            feedback["_hard_fail"] = (
+                f"factual_accuracy=0 with {fab_count} fabricated terms → reject"
+            )
+
         feedback["editorial_tier"] = tier
 
         # `passed` now means "ship it" — anything tier=clean/note/strong.

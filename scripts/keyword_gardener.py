@@ -129,12 +129,19 @@ TREND_PROMPT = """You are a trend researcher for a multi-game gacha guide site
 covering: {games}.
 
 Use Google Search to find what is TRENDING RIGHT NOW (rising search interest
-in the last 7 days): new character / banner announcements, version & patch
-updates, confirmed release dates, collabs, post-patch tier shifts.
+in the last 7 days): version & patch updates, post-patch tier/meta shifts,
+events, collabs, and ALREADY-RELEASED characters newly in the spotlight.
 
-Prefer well-documented games (Genshin, Honkai Star Rail, Zenless Zone Zero,
-Wuthering Waves) where real current sources exist. For brand-new or sparse
-games, DO NOT speculate on unreleased specifics — skip them entirely.
+HARD RULES to avoid fabrication:
+- ONLY well-documented games (Genshin, Honkai Star Rail, Zenless Zone Zero,
+  Wuthering Waves) where a live wiki/source already documents the subject.
+- The subject MUST already be released and documented. DO NOT propose
+  keywords about unreleased / leaked / just-announced characters whose kits
+  aren't public yet (e.g. "<new character> best build") — those force the
+  writer to fabricate. If you can't open a source page describing it now,
+  skip it.
+- Prefer trend angles that are inherently grounded: "<game> <version> patch
+  notes", "<game> current banner tier impact", "best teams after <version>".
 
 Existing keywords (do NOT duplicate, case-insensitive):
 {existing_sample}
