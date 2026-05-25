@@ -432,7 +432,7 @@ def auto_balance_types(
             and (d.get("keyword") or "").strip().lower()
             and (d.get("keyword") or "").strip().lower() not in existing
         ]
-        if candidate_items:
+        if candidate_items and not ecom:  # ecommerce brands are known — skip gaming verifier
             candidate_items, vcost, vrej = _gate_keywords_by_entity_verify(
                 provider, model, candidate_items, site_id,
                 budget_usd=max(budget_usd * 0.5, 0.20),
@@ -629,19 +629,24 @@ def main() -> int:
         return 0
 
     # Entity-verify gate (P0 二次修复 2026-05-11): drop fabricated-entity
-    # keywords BEFORE they enter the pool. Costs ~$0.005 per non-category
-    # keyword. Skipped entirely for keywords that are pure-category
-    # queries (no candidate proper nouns).
-    print(f"   🔬 entity-verify gate on {len(fresh)} candidate(s)")
-    verify_budget = max(args.budget_usd * 0.5, 0.30)
-    fresh, verify_cost, verify_rejected = _gate_keywords_by_entity_verify(
-        provider, model, fresh, site_id, verify_budget, log=print,
-    )
-    print(f"   🔬 verify: kept {len(fresh)}, dropped {verify_rejected}, "
-          f"cost ${verify_cost:.4f}")
-    if not fresh:
-        print(f"   ✓ nothing left after verify; nothing inserted")
-        return 0
+    # keywords BEFORE they enter the pool. This guards against the gaming
+    # writer hallucinating sparse new-game proper nouns. For the ECOMMERCE
+    # niche the "entities" are well-known established brands (Amazon, Etsy,
+    # Photoroom…) that the verifier (gaming-scoped) wrongly flags as
+    # fabricated — so we skip the gate there (article-time QA still checks).
+    if ecom:
+        print(f"   🔬 entity-verify gate skipped (ecommerce niche — brands are known)")
+    else:
+        print(f"   🔬 entity-verify gate on {len(fresh)} candidate(s)")
+        verify_budget = max(args.budget_usd * 0.5, 0.30)
+        fresh, verify_cost, verify_rejected = _gate_keywords_by_entity_verify(
+            provider, model, fresh, site_id, verify_budget, log=print,
+        )
+        print(f"   🔬 verify: kept {len(fresh)}, dropped {verify_rejected}, "
+              f"cost ${verify_cost:.4f}")
+        if not fresh:
+            print(f"   ✓ nothing left after verify; nothing inserted")
+            return 0
 
     inserted = 0
     with get_db_connection() as conn, conn.cursor() as cur:
