@@ -39,11 +39,13 @@ DEFAULT_INLINE_COUNT = 6          # fallback when caller passes no section list
 # anime scenes (generic adventurers, environments, FX) and only forbid the
 # game's actual characters / trademarks / text.
 _COPYRIGHT_GUARD = (
-    "Hard rules: NO text, NO captions, NO logos, NO watermarks, NO UI overlays, "
-    "NO real photographic people. Do NOT depict the game's actual named or "
-    "copyrighted characters, and do not make any figure recognizable as an "
-    "existing IP character — use ONLY original, generic characters. No "
-    "trademarked logos or brand marks."
+    "Hard rules: render ZERO text of any kind — no words, letters, labels, "
+    "captions, numbers, signage, packaging copy, or simulated UI text; leave "
+    "every surface, screen, label and package blank and unlettered. "
+    "NO logos, NO watermarks, NO real photographic people. Do NOT depict the "
+    "game's actual named or copyrighted characters, and do not make any figure "
+    "recognizable as an existing IP character — use ONLY original, generic "
+    "characters. No trademarked logos or brand marks."
 )
 
 # Per-game art direction so each game looks like itself (key-art vibe) instead
@@ -71,14 +73,15 @@ GAMING_RENDER = (
     "Polished anime-style key-art digital illustration, cinematic dramatic "
     "lighting, atmospheric depth, dynamic composition. " + _QUALITY
 )
-# Ecommerce: let the FORMAT follow the content (product shot, flat-lay,
-# before/after, UI mockup, infographic) instead of one rigid look — but always
-# high-end and clean.
+# Ecommerce: let the FORMAT follow the content but favour PHOTOGRAPHIC formats
+# that don't invite lettering. We deliberately avoid dashboard/UI mockups and
+# infographics — those make the model render garbled fake text.
 ECOM_STYLE = (
-    "Style: pick the format that best fits this specific content — a clean "
-    "studio product shot, a tasteful flat-lay, a before/after split, a sleek "
-    "app/dashboard mockup, or a minimal infographic — rendered in a modern, "
-    "high-end e-commerce editorial look with bright clean lighting. "
+    "Style: pick the photographic format that best fits this specific content "
+    "— a clean studio product shot, a tasteful flat-lay, a real-life lifestyle "
+    "scene, or a before/after split of physical products — rendered in a "
+    "modern, high-end e-commerce editorial look with bright clean lighting. "
+    "Show physical objects and scenes, NOT screens or interfaces. "
     + _QUALITY + " " + _COPYRIGHT_GUARD
 )
 
@@ -102,8 +105,9 @@ def hero_prompt(niche: str | None, title: str, *, art_style: str | None = None) 
     if _is_ecom(niche):
         subject = (
             f"Editorial cover image representing the concept of: \"{title}\". "
-            "Depict concrete relevant objects — product photos, a tidy desk "
-            "setup, packaging, or a stylized dashboard/chart — never people."
+            "Depict concrete physical objects — product photos, a tidy desk or "
+            "studio setup, props, or packaging (all unlabeled) — never people, "
+            "never screens or text."
         )
         return f"{subject} {ECOM_STYLE}"
     style = art_style or _DEFAULT_GAME_ART
@@ -129,9 +133,10 @@ def inline_prompt(
     if _is_ecom(niche):
         subject = (
             f"Section illustration for the '{section_topic}' part of an article "
-            f"about {article_theme}. Show one concrete relevant visual: a "
-            "product shot, a before/after, a stylized data chart, or a "
-            "workflow-step scene — never people."
+            f"about {article_theme}. Show one concrete physical visual: a "
+            "product shot, a before/after of physical products, a styled "
+            "lifestyle scene, or props on a clean surface — never people, "
+            "never screens or text."
         )
         return f"{subject} Compose clearly differently from a cover shot. {ECOM_STYLE}"
     style = art_style or _DEFAULT_GAME_ART
