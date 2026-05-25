@@ -63,11 +63,15 @@ def check_budget(domain: str, cfg: dict) -> None:
     if cap <= 0:
         return
     with get_db_connection() as conn, conn.cursor() as cur:
+        # LLM (agent_runs) + image (images) cost, month-to-date.
         cur.execute(
-            "select coalesce(sum(cost_usd),0) from agent_runs "
-            "where site_id=(select id from sites where domain=%s) "
-            "and created_at >= date_trunc('month', now())",
-            (domain,),
+            "select coalesce((select sum(cost_usd) from agent_runs "
+            "  where site_id=(select id from sites where domain=%(d)s) "
+            "    and created_at >= date_trunc('month', now())),0) "
+            "+ coalesce((select sum(cost_usd) from images "
+            "  where site_id=(select id from sites where domain=%(d)s) "
+            "    and created_at >= date_trunc('month', now())),0)",
+            {"d": domain},
         )
         spent = float(cur.fetchone()[0] or 0)
     pct = spent / cap if cap else 0

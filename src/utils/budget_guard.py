@@ -75,14 +75,23 @@ def check_monthly_budget(site_id: UUID | str) -> BudgetCheck:
         budget = float(cfg.get("monthly_budget_usd", DEFAULT_BUDGET_USD))
         cron_paused = bool(cfg.get("cron_paused", False))
 
+        # Month-to-date spend = LLM (agent_runs) + image (images) cost. Image
+        # cost lives in the images table, not agent_runs, so we must add both
+        # or the guard undercounts (image cost is ~half the per-article total).
         cur.execute(
             """
-            select coalesce(sum(cost_usd), 0)::float
-              from agent_runs
-             where site_id = %s
-               and created_at >= date_trunc('month', now() at time zone 'utc')
+            select coalesce((
+                     select sum(cost_usd) from agent_runs
+                      where site_id = %(sid)s
+                        and created_at >= date_trunc('month', now() at time zone 'utc')
+                   ), 0)::float
+                 + coalesce((
+                     select sum(cost_usd) from images
+                      where site_id = %(sid)s
+                        and created_at >= date_trunc('month', now() at time zone 'utc')
+                   ), 0)::float
             """,
-            (site_id_str,),
+            {"sid": site_id_str},
         )
         spent = float(cur.fetchone()[0])
 

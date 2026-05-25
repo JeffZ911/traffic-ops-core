@@ -22,6 +22,7 @@ from src.agents.outline import OutlineAgent
 from src.agents.qa import QAAgent
 from src.agents.writing import WritingAgent
 from src.db.client import get_db_connection
+from src.utils.article_cost import recompute_article_cost
 from src.utils.llm import get_llm_provider
 
 
@@ -396,6 +397,13 @@ def run_one_article(
                 qa_score=score,
                 qa_feedback=qa_result.get("feedback"),
             )
+
+            # Roll up text-agent cost/tokens into the article now (image cost
+            # is added later by the image step, which recomputes again).
+            try:
+                recompute_article_cost(article_id)
+            except Exception as _e:  # noqa: BLE001 — cost rollup must never break the pipeline
+                log(f"  ⚠️  cost rollup skipped: {type(_e).__name__}")
 
             if passed:
                 _set_article(article_id, status="qa_passed")

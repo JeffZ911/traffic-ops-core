@@ -276,6 +276,15 @@ def main() -> int:
             else:
                 print(f"  ⚠️  md file not found: {md_path}")
 
+        # Now that image rows exist, roll the image cost into the article's
+        # total_cost_usd (text cost was already rolled up by the orchestrator).
+        try:
+            from src.utils.article_cost import recompute_article_cost
+            tot = recompute_article_cost(article_id)
+            print(f"  ↳ article total_cost_usd now ${tot['cost_usd']:.4f}")
+        except Exception as e:
+            print(f"  ⚠️  cost rollup skipped: {type(e).__name__}")
+
         print(f"  → hero {hero_url}  ({len(inline_urls)} inline)  "
               f"cost ${result['total_cost_usd']:.4f}  cumulative ${cumulative_cost:.4f}")
         print()
