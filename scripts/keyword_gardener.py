@@ -42,7 +42,7 @@ from scripts._keyword_entity_verify import verify_keyword, VerifyResult
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 
-# Map article types to natural-language hints we feed the LLM
+# Map article types to natural-language hints we feed the LLM (GAMING niche)
 TYPE_HINTS = {
     "build":        'character build / "best build for X"',
     "tier_list":    'tier lists / "best DPS / Support / Healer"',
@@ -54,6 +54,72 @@ TYPE_HINTS = {
     "faq":          'FAQ / mechanics-explained content',
     "comparison":   '"X vs Y" head-to-heads',
 }
+
+# ECOMMERCE niche (e.g. pixelmatch.art) — totally different taxonomy. Used
+# when sites.config.niche == 'ecommerce_tools'. Keeping this separate is what
+# stops the gardener from seeding game keywords into an ecommerce pool.
+ECOM_TYPE_HINTS = {
+    "tool_guide":    'how-to guides for online sellers ("how to X on Amazon/Shopify/Etsy")',
+    "vs_comparison": '"Tool X vs Tool Y" comparisons for ecommerce sellers',
+    "use_case":      'seller case studies / workflow stories ("how a brand did X")',
+    "policy_guide":  'platform policy / spec references (image specs, listing rules, fees)',
+}
+
+ECOM_PROMPT_TEMPLATE = """You are an SEO researcher for {brand_name}, a blog for
+ecommerce sellers about AI product photography, product-image optimization,
+and selling on Amazon / Shopify / Etsy / TikTok Shop.
+
+We already have these keywords — DO NOT duplicate (case-insensitive):
+{existing_sample}
+
+Use Google Search to find current SELLER search-intent keywords (last 30
+days). Generate exactly {n_target} NEW keywords across these article types:
+
+{type_section}
+
+HARD RULE: this is an ECOMMERCE SELLER blog. Absolutely NO video-game,
+gacha, or anime-game topics — no game titles (Genshin, Neverness to Everness,
+etc.), no characters, no "tier list / build / reroll / banner". Every keyword
+must be about selling physical/digital products online.
+
+Reply ONLY with a single JSON array (no markdown fence, no preamble), each
+element shaped:
+{{
+  "keyword": "<lowercase seller search query, 3-8 words>",
+  "intent": "informational | comparison | how-to | list",
+  "article_type": "<one of the types above>",
+  "priority_score": <integer 50-90; higher = more search demand>,
+  "notes": "<one short reason / source>"
+}}
+"""
+
+ECOM_TYPE_BALANCE_PROMPT = """You are an SEO researcher for {brand_name}, an
+ecommerce-seller blog (AI product photography, listing optimization,
+marketplace selling).
+
+ZERO articles published in the last 14 days for the '{article_type}'
+category. Seed 5-8 keywords that NATURALLY fit it:
+
+  {article_type}: {type_hint}
+
+Existing keywords (DO NOT duplicate, case-insensitive):
+{existing_sample}
+
+Use Google Search for current seller search-intent. HARD RULE: NO video-game
+/ gacha / anime-game topics whatsoever — ecommerce selling only.
+
+Reply ONLY with a single JSON array (no fence). Each element:
+{{
+  "keyword": "<lowercase, 3-8 words>",
+  "intent": "informational | comparison | how-to | list",
+  "priority_score": <integer 60-85>,
+  "notes": "<one short reason>"
+}}
+"""
+
+
+def _is_ecom(config: dict) -> bool:
+    return (config.get("niche") or "gaming") == "ecommerce_tools"
 
 PROMPT_TEMPLATE = """You are an SEO researcher for a fan-database site about {game_name}
 (abbreviation {game_abbr}, released {release_date}). The site needs fresh
@@ -264,7 +330,14 @@ def auto_balance_types(
         (str(site_id), date.today() - timedelta(days=14)),
     )
     have_recent = {r[0] for r in cur.fetchall() if r[0]}
-    starved = [t for t in TYPE_HINTS if t not in have_recent]
+    ecom = _is_ecom(config)
+    hints = ECOM_TYPE_HINTS if ecom else TYPE_HINTS
+    # Universe of types is niche-specific (ecommerce sites have no build/boss/…).
+    universe = (
+        (config.get("allowed_article_types") or list(ECOM_TYPE_HINTS.keys()))
+        if ecom else list(TYPE_HINTS.keys())
+    )
+    starved = [t for t in universe if t not in have_recent]
 
     # Respect sites.config.content_plan.type_blacklist: never seed keywords
     # for a category the operator has marked unwritable. Without this, the
@@ -291,6 +364,7 @@ def auto_balance_types(
         or "gemini-3-flash-preview"
     )
     game = config.get("game", {})
+    brand_name = (config.get("brand") or {}).get("name") or "this ecommerce blog"
 
     existing_sample = sorted(existing)
     if len(existing_sample) > 50:
@@ -305,14 +379,22 @@ def auto_balance_types(
             print(f"   ⛔ auto-balance budget cap ${budget_usd:.2f} hit; "
                   f"stopping at {atype}")
             break
-        prompt = TYPE_BALANCE_PROMPT.format(
-            game_name=game.get("name", "the game"),
-            game_abbr=game.get("abbreviation", ""),
-            release_date=game.get("release_date", "recently"),
-            article_type=atype,
-            type_hint=TYPE_HINTS.get(atype, "general content"),
-            existing_sample=existing_lines,
-        )
+        if ecom:
+            prompt = ECOM_TYPE_BALANCE_PROMPT.format(
+                brand_name=brand_name,
+                article_type=atype,
+                type_hint=hints.get(atype, "general content"),
+                existing_sample=existing_lines,
+            )
+        else:
+            prompt = TYPE_BALANCE_PROMPT.format(
+                game_name=game.get("name", "the game"),
+                game_abbr=game.get("abbreviation", ""),
+                release_date=game.get("release_date", "recently"),
+                article_type=atype,
+                type_hint=TYPE_HINTS.get(atype, "general content"),
+                existing_sample=existing_lines,
+            )
         try:
             resp = provider.generate(
                 prompt=prompt, model=model, max_tokens=2000, temperature=0.4,
@@ -428,8 +510,9 @@ def main() -> int:
         planned_count = cur.fetchone()[0]
         existing = _existing_keywords(cur, site_id)
 
+    ecom = _is_ecom(config)
     print(f"🌱 Keyword Gardener")
-    print(f"   site:           ntecodex.com")
+    print(f"   site:           {site_domain}  (niche={'ecommerce_tools' if ecom else 'gaming'})")
     print(f"   planned now:    {planned_count}")
     print(f"   threshold:      {args.min_planned}")
     print(f"   total in pool:  {len(existing)}")
@@ -439,17 +522,22 @@ def main() -> int:
 
     print(f"   → topping up by {args.target}")
 
-    game = config.get("game", {})
     content_plan = config.get("content_plan") or {}
-    diversity = content_plan.get("diversity", {})
-    required_types = diversity.get("required_types") or list(TYPE_HINTS.keys())
     type_blacklist: list[str] = list(content_plan.get("type_blacklist") or [])
 
-    # Filter the required_types list by the blacklist so the prompt never
-    # invites a blacklisted category in the first place.
+    # Pick the niche's taxonomy + allowed types.
+    hints = ECOM_TYPE_HINTS if ecom else TYPE_HINTS
+    if ecom:
+        required_types = (config.get("allowed_article_types")
+                          or list(ECOM_TYPE_HINTS.keys()))
+    else:
+        diversity = content_plan.get("diversity", {})
+        required_types = diversity.get("required_types") or list(TYPE_HINTS.keys())
+
+    # Filter by blacklist so the prompt never invites a blacklisted category.
     allowed_required = [t for t in required_types if t not in type_blacklist]
     type_section = "\n".join(
-        f"  - {t}: {TYPE_HINTS.get(t, 'general guide')}"
+        f"  - {t}: {hints.get(t, 'general guide')}"
         for t in allowed_required
     )
 
@@ -460,15 +548,25 @@ def main() -> int:
         existing_sample = existing_sample[:30] + existing_sample[-30:]
     existing_lines = "\n".join(f"  - {kw}" for kw in existing_sample) or "  (empty pool)"
 
-    prompt = PROMPT_TEMPLATE.format(
-        game_name=game.get("name", "the game"),
-        game_abbr=game.get("abbreviation", ""),
-        release_date=game.get("release_date", "recently"),
-        existing_sample=existing_lines,
-        n_target=args.target,
-        type_section=type_section,
-        type_blacklist=json.dumps(type_blacklist) if type_blacklist else "  (none)",
-    )
+    if ecom:
+        brand_name = (config.get("brand") or {}).get("name") or "this ecommerce blog"
+        prompt = ECOM_PROMPT_TEMPLATE.format(
+            brand_name=brand_name,
+            existing_sample=existing_lines,
+            n_target=args.target,
+            type_section=type_section,
+        )
+    else:
+        game = config.get("game", {})
+        prompt = PROMPT_TEMPLATE.format(
+            game_name=game.get("name", "the game"),
+            game_abbr=game.get("abbreviation", ""),
+            release_date=game.get("release_date", "recently"),
+            existing_sample=existing_lines,
+            n_target=args.target,
+            type_section=type_section,
+            type_blacklist=json.dumps(type_blacklist) if type_blacklist else "  (none)",
+        )
 
     provider = get_llm_provider("gemini")
     text_cfg = config.get("text_provider") or {}
