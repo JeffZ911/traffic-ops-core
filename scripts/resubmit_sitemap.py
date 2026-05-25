@@ -42,13 +42,15 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 def _sitemap_url_for(domain: str, config: dict) -> str:
     """Where the sitemap actually lives.
 
-    Ecommerce sites deploy under blog.<domain> (Astro base=/blog), so
-    their sitemap is at https://blog.<domain>/sitemap.xml. Gaming sites
-    serve at the apex.
+    Ecommerce sites: Phase-3 cutover (2026-05-25) — the apex now reverse-
+    proxies /blog/* to the CF Pages origin, so the canonical sitemap is at
+    https://<domain>/blog/sitemap.xml (root domain, matches canonical tags).
+    NOT blog.<domain> anymore (that subdomain 301s to the apex).
+    Gaming sites serve at the apex root.
     """
     niche = (config or {}).get("niche") or "gaming"
     if niche == "ecommerce_tools":
-        return f"https://blog.{domain}/sitemap.xml"
+        return f"https://{domain}/blog/sitemap.xml"
     return f"https://{domain}/sitemap.xml"
 
 
