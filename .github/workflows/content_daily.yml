@@ -161,6 +161,26 @@ jobs:
               --auto-balance-types
           fi
 
+      # ------------------------------------------------------------- 2b.
+      # Trend-jacking ("蹭话题"): once/day, seed time-sensitive 'trend'
+      # keywords for rising topics. KeywordSelector gives these a decaying
+      # freshness bonus so they're written same-day (QDF window) then expire.
+      # Hour-guarded to 07:00 UTC so it runs exactly once per day.
+      - name: Trend scan (keyword gardener --trending)
+        if: steps.budget.outputs.action != 'pause_all'
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          if [ "$(date -u +%H)" = "07" ]; then
+            python -m scripts.keyword_gardener --trending --target 5
+          else
+            echo "skip — trend scan runs once/day at 07:00 UTC (now $(date -u +%H):00)"
+          fi
+
       # ---------------------------------------------------------------- 3.
       # Velocity push (Phase 2.4): 4 articles per cron invocation, 6
       # cron/day → 24 attempts/day. Per-iteration budget check inside

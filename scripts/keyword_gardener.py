@@ -121,6 +121,147 @@ Reply ONLY with a single JSON array (no fence). Each element:
 def _is_ecom(config: dict) -> bool:
     return (config.get("niche") or "gaming") == "ecommerce_tools"
 
+
+# ── Trend-jacking ("蹭话题") prompts. Capture RISING interest so a young,
+# low-authority site can win the QDF (Query-Deserves-Freshness) window before
+# established sites publish. Source-bound to avoid fabricating new specifics.
+TREND_PROMPT = """You are a trend researcher for a multi-game gacha guide site
+covering: {games}.
+
+Use Google Search to find what is TRENDING RIGHT NOW (rising search interest
+in the last 7 days): new character / banner announcements, version & patch
+updates, confirmed release dates, collabs, post-patch tier shifts.
+
+Prefer well-documented games (Genshin, Honkai Star Rail, Zenless Zone Zero,
+Wuthering Waves) where real current sources exist. For brand-new or sparse
+games, DO NOT speculate on unreleased specifics — skip them entirely.
+
+Existing keywords (do NOT duplicate, case-insensitive):
+{existing_sample}
+
+Return exactly {n_target} keywords capturing rising interest, each mapping to
+ONE of these article types: {types}.
+
+Only include a trend you can back with a REAL, current source. Reply ONLY with
+a JSON array (no fence), each element:
+{{"keyword": "<lowercase 3-8 words>", "intent": "informational|comparison|how-to|list",
+  "article_type": "<one of the types>", "priority_score": <70-95>,
+  "notes": "<the trigger event + source>"}}
+"""
+
+ECOM_TREND_PROMPT = """You are a trend researcher for {brand_name}, an
+ecommerce-seller blog (AI product photography, listing optimization,
+marketplace selling).
+
+Use Google Search for what is TRENDING in the last 7 days relevant to online
+sellers: new AI image models / tools, marketplace policy changes
+(Amazon / Shopify / Etsy / TikTok Shop), major selling events (BFCM,
+Prime Day, CNY sourcing), new platform features.
+
+Existing keywords (do NOT duplicate, case-insensitive):
+{existing_sample}
+
+Return exactly {n_target} keywords for rising interest, each mapping to ONE
+of: {types}. HARD RULE: NO video-game topics whatsoever. Only verifiable
+trends with a real current source.
+
+Reply ONLY with a JSON array (no fence), each element:
+{{"keyword": "<lowercase 3-8 words>", "intent": "informational|comparison|how-to|list",
+  "article_type": "<one of the types>", "priority_score": <70-95>,
+  "notes": "<the trigger event + source>"}}
+"""
+
+
+def run_trending(site_id: UUID, config: dict, existing: set[str], args) -> int:
+    """Seed time-sensitive 'trend' keywords (source='trend'). KeywordSelector
+    gives these a freshness bonus (by created_at) that decays over ~2 weeks,
+    so they get written fast then expire. Returns rows inserted."""
+    ecom = _is_ecom(config)
+    type_blacklist = list((config.get("content_plan") or {}).get("type_blacklist") or [])
+    if ecom:
+        types = [t for t in (config.get("allowed_article_types")
+                             or list(ECOM_TYPE_HINTS.keys())) if t not in type_blacklist]
+        brand_name = (config.get("brand") or {}).get("name") or "this ecommerce blog"
+    else:
+        types = [t for t in TYPE_HINTS if t not in type_blacklist]
+
+    existing_sample = sorted(existing)
+    if len(existing_sample) > 50:
+        existing_sample = existing_sample[:25] + existing_sample[-25:]
+    existing_lines = "\n".join(f"  - {kw}" for kw in existing_sample) or "  (empty pool)"
+
+    if ecom:
+        prompt = ECOM_TREND_PROMPT.format(
+            brand_name=brand_name, existing_sample=existing_lines,
+            n_target=args.target, types=", ".join(types),
+        )
+    else:
+        games = ", ".join(
+            (m.get("display_name") or g)
+            for g, m in (config.get("game_metadata") or {}).items()
+        ) or (config.get("game", {}).get("name") or "popular gacha games")
+        prompt = TREND_PROMPT.format(
+            games=games, existing_sample=existing_lines,
+            n_target=args.target, types=", ".join(types),
+        )
+
+    provider = get_llm_provider("gemini")
+    text_cfg = config.get("text_provider") or {}
+    model = (text_cfg.get("keyword_research_model")
+             or text_cfg.get("outline_model") or "gemini-3-flash-preview")
+    print(f"   📈 trend scan ({'ecommerce' if ecom else 'gaming'})")
+    resp = provider.generate(prompt=prompt, model=model, max_tokens=3000,
+                             temperature=0.4, json_mode=True, enable_search=True)
+    try:
+        data = json.loads(resp.text.strip())
+    except Exception:
+        try:
+            data = extract_json("{\"items\": " + resp.text + "}").get("items", [])
+        except Exception:
+            print("   ⚠️  trend parse failed"); return 0
+    if isinstance(data, dict):
+        for k in ("keywords", "items", "results"):
+            if isinstance(data.get(k), list):
+                data = data[k]; break
+    if not isinstance(data, list):
+        return 0
+
+    fresh = [d for d in data if isinstance(d, dict)
+             and (d.get("keyword") or "").strip().lower()
+             and (d.get("keyword") or "").strip().lower() not in existing
+             and d.get("article_type") in types]
+
+    # NOTE: the entity-verify gate is skipped for trend mode. It is scoped to
+    # the single (NTE) game context and false-positives on real characters
+    # from the OTHER covered games (it flagged Genshin's Clorinde, WuWa's
+    # Yinlin, ZZZ's Jane Doe as "fabricated"). Trends are search-sourced +
+    # prompt-bound to well-documented games, and article-time QA + the
+    # inline-citation binding catch any fabrication downstream.
+
+    inserted = 0
+    with get_db_connection() as conn, conn.cursor() as cur:
+        for item in fresh:
+            kw = (item.get("keyword") or "").strip()
+            try:
+                cur.execute(
+                    """
+                    insert into keywords
+                      (site_id, keyword, intent, priority_score, source, notes, status)
+                    values (%s, %s, %s, %s, 'trend', %s, 'planned')
+                    on conflict (site_id, keyword) do nothing
+                    """,
+                    (str(site_id), kw, item.get("intent"),
+                     int(item.get("priority_score") or 80),
+                     ("[trend] " + (item.get("notes") or ""))[:500]),
+                )
+                if cur.rowcount:
+                    inserted += 1
+                    existing.add(kw.lower())
+            except Exception as e:
+                print(f"   ⚠️  trend insert skip {kw!r}: {e}")
+    print(f"   📈 trend: +{inserted} keyword(s) (cost ${resp.cost_usd:.4f})")
+    return inserted
+
 PROMPT_TEMPLATE = """You are an SEO researcher for a fan-database site about {game_name}
 (abbreviation {game_abbr}, released {release_date}). The site needs fresh
 long-tail keywords every day so the daily content pipeline always has
@@ -488,6 +629,11 @@ def main() -> int:
                         "0 published in the last 14 days and auto-seed 5-8 "
                         "keywords per starved type (source='auto_type_balance'). "
                         "Skipped if planned pool already has ≥40 keywords.")
+    p.add_argument("--trending", action="store_true",
+                   help="Trend-jacking mode: seed time-sensitive 'trend' "
+                        "keywords for rising topics (source='trend'). Runs "
+                        "instead of the normal top-up; pair with a daily cron "
+                        "slot. KeywordSelector decays their freshness bonus.")
     args = p.parse_args()
 
     import os
@@ -511,6 +657,13 @@ def main() -> int:
         existing = _existing_keywords(cur, site_id)
 
     ecom = _is_ecom(config)
+
+    # Trend mode is a separate concern from evergreen pool top-up.
+    if args.trending:
+        print(f"📈 Keyword Gardener — TREND mode ({site_domain})")
+        run_trending(site_id, config, existing, args)
+        return 0
+
     print(f"🌱 Keyword Gardener")
     print(f"   site:           {site_domain}  (niche={'ecommerce_tools' if ecom else 'gaming'})")
     print(f"   planned now:    {planned_count}")

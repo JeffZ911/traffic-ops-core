@@ -46,6 +46,22 @@ ALL_TYPES: tuple[str, ...] = (
 
 GSC_LONGTAIL_BONUS = 20.0
 
+
+def _trend_freshness_bonus(source: str | None, age_days: float | None) -> float:
+    """Trend-jacking: source='trend' keywords get a big bonus that DECAYS so
+    they're written while the topic is hot (QDF window), then expire. Only
+    applies to trend-sourced keywords — evergreen keywords are unaffected."""
+    if source != "trend" or age_days is None:
+        return 0.0
+    a = float(age_days)
+    if a < 3:
+        return 50.0
+    if a < 7:
+        return 25.0
+    if a < 14:
+        return 5.0
+    return 0.0  # stale trend — no longer boosted (falls back to base priority)
+
 # QA-pass-rate weighting thresholds (Phase 2.4 — 2026-05-12).
 # Aggressive 4-band scheme to push the cron toward consistently-passing
 # article types when daily volume goes from 1→24 attempts. At 24/day a
@@ -272,7 +288,8 @@ class KeywordSelectorAgent(BaseAgent):
 
             cur.execute(
                 """
-                select id, keyword, intent, priority_score, source, notes
+                select id, keyword, intent, priority_score, source, notes,
+                       extract(epoch from (now() - created_at))/86400.0 as age_days
                   from keywords
                  where site_id = %s
                    and status = 'planned'
@@ -321,7 +338,7 @@ class KeywordSelectorAgent(BaseAgent):
                 return None
 
             candidates: list[dict[str, Any]] = []
-            for kid, kw, intent, pri, src, notes in cand_rows:
+            for kid, kw, intent, pri, src, notes, age_days in cand_rows:
                 game_slug = _game_from_notes(notes)
                 # Per-game blacklist (preferred) else fall back to the flat one.
                 effective_blacklist = (
@@ -338,6 +355,7 @@ class KeywordSelectorAgent(BaseAgent):
                 )
                 game_weight = float(game_priorities.get(game_slug, 0.0)) if game_slug else 0.0
                 game_bonus = round(game_weight * GAME_PRIORITY_WEIGHT, 2)
+                trend_bonus = _trend_freshness_bonus(src, age_days)
                 candidates.append({
                     "keyword_id": str(kid),
                     "keyword": kw,
@@ -350,8 +368,9 @@ class KeywordSelectorAgent(BaseAgent):
                     "type_adjustment_reason": type_label,
                     "game_bonus": game_bonus,
                     "game_weight": game_weight,
+                    "trend_bonus": trend_bonus,
                     "priority_with_bonus": round(
-                        base + gsc_bonus + type_bonus + game_bonus, 2
+                        base + gsc_bonus + type_bonus + game_bonus + trend_bonus, 2
                     ),
                 })
             if not candidates:

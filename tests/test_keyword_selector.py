@@ -159,8 +159,8 @@ def _patch_db_with_candidates(candidates_rows):
 def test_execute_rejects_blacklisted_article_type():
     KW_ID = "00000000-0000-0000-0000-000000000001"
     candidates_rows = [
-        (KW_ID, "nte banner schedule 2026", "informational", 80, "manual", None),
-        ("11111111-1111-1111-1111-111111111111", "nte how pity works", "informational", 70, "manual", None),
+        (KW_ID, "nte banner schedule 2026", "informational", 80, "manual", None, None),
+        ("11111111-1111-1111-1111-111111111111", "nte how pity works", "informational", 70, "manual", None, None),
     ]
     llm_text = (
         '{"keyword_id": "11111111-1111-1111-1111-111111111111",'
@@ -177,7 +177,7 @@ def test_execute_rejects_blacklisted_article_type():
 def test_execute_rejects_unknown_article_type():
     KW_ID = "00000000-0000-0000-0000-000000000001"
     candidates_rows = [
-        (KW_ID, "nte how pity works", "informational", 70, "manual", None),
+        (KW_ID, "nte how pity works", "informational", 70, "manual", None, None),
     ]
     llm_text = (
         f'{{"keyword_id": "{KW_ID}",'
@@ -194,7 +194,7 @@ def test_execute_rejects_unknown_article_type():
 def test_execute_accepts_valid_pick_and_normalizes_output():
     KW_ID = "00000000-0000-0000-0000-000000000001"
     candidates_rows = [
-        (KW_ID, "nte how pity works", "informational", 70, "manual", None),
+        (KW_ID, "nte how pity works", "informational", 70, "manual", None, None),
     ]
     # LLM returns the new field name only; verify backward-compat keeps both keys.
     llm_text = (
@@ -215,8 +215,8 @@ def test_execute_accepts_valid_pick_and_normalizes_output():
 def test_execute_filters_blacklisted_candidates_before_llm():
     """Banner-keyword candidates should never reach the LLM when news is blacklisted."""
     candidates_rows = [
-        ("11111111-1111-1111-1111-111111111111", "nte current banner schedule", "informational", 90, "manual", None),
-        ("22222222-2222-2222-2222-222222222222", "nte how pity works", "informational", 70, "manual", None),
+        ("11111111-1111-1111-1111-111111111111", "nte current banner schedule", "informational", 90, "manual", None, None),
+        ("22222222-2222-2222-2222-222222222222", "nte how pity works", "informational", 70, "manual", None, None),
     ]
     # LLM picks the second (only) candidate left after filter
     KW_ID2 = "22222222-2222-2222-2222-222222222222"

@@ -160,6 +160,25 @@ jobs:
               --auto-balance-types
           fi
 
+      # ------------------------------------------------------------- 2b.
+      # Trend-jacking ("蹭话题"): once/day at 03:00 UTC, seed time-sensitive
+      # ecommerce 'trend' keywords (new AI tools, platform policy changes,
+      # selling events). KeywordSelector decays their freshness bonus.
+      - name: Trend scan (keyword gardener --trending)
+        if: steps.budget.outputs.action != 'pause_all'
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          if [ "$(date -u +%H)" = "03" ]; then
+            python -m scripts.keyword_gardener --trending --target 5
+          else
+            echo "skip — trend scan runs once/day at 03:00 UTC (now $(date -u +%H):00)"
+          fi
+
       # ---------------------------------------------------------------- 3.
       # Article generation — slow-start: 3 articles per cron × 2 crons/day
       # = ~6 articles/day. Bump to batch=4 + 24 cron/day when ramping.
