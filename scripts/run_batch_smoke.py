@@ -39,17 +39,36 @@ def main() -> int:
                    help="How many articles to attempt this batch")
     p.add_argument("--max-retries", type=int, default=1,
                    help="QA-rewrite retry rounds inside each article")
+    p.add_argument("--daily-cap", type=int, default=None,
+                   help="Override sites.config.content_plan.daily_article_cap")
     args = p.parse_args()
 
     import os
     site_domain = os.getenv("SITE_DOMAIN", "ntecodex.com")
     with get_db_connection() as conn, conn.cursor() as cur:
-        cur.execute("select id from sites where domain=%s limit 1", (site_domain,))
+        cur.execute("select id, config from sites where domain=%s limit 1", (site_domain,))
         row = cur.fetchone()
         if not row:
             print(f"❌ site {site_domain!r} not found in sites table")
             return 2
-        site_id = row[0]
+        site_id, _cfg = row
+    # Daily production cap (quality-first cadence). Resolution order:
+    #   --daily-cap arg → sites.config.content_plan.daily_article_cap → 5.
+    _cap_cfg = ((_cfg or {}).get("content_plan") or {}).get("daily_article_cap")
+    daily_cap = args.daily_cap if args.daily_cap is not None else (
+        int(_cap_cfg) if _cap_cfg is not None else 5
+    )
+
+    def _produced_today() -> int:
+        """Articles created today (UTC) for this site — any status, since a
+        failed attempt still consumed a slot + spend."""
+        with get_db_connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "select count(*) from articles where site_id=%s "
+                "and created_at >= date_trunc('day', now() at time zone 'utc')",
+                (str(site_id),),
+            )
+            return int(cur.fetchone()[0])
 
     print("=" * 78)
     print(f"=== Batch smoke: {args.count} articles ===")
@@ -59,6 +78,14 @@ def main() -> int:
     t0 = time.perf_counter()
 
     for i in range(1, args.count + 1):
+        # Daily-cap check — stop once today's quota is met, regardless of how
+        # often the cron fires. This is what actually holds output to ~N/day.
+        done_today = _produced_today()
+        if done_today >= daily_cap:
+            print(f"\n✋ daily cap reached: {done_today}/{daily_cap} articles "
+                  f"already produced today for {site_domain}; stopping batch.")
+            break
+
         # Per-iteration budget check — bail mid-batch if we cross 95%.
         bg = check_monthly_budget(site_id)
         if bg.action == "pause_all":
