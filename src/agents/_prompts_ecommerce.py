@@ -99,6 +99,14 @@ CRITICAL FACTUAL ACCURACY RULES (ecommerce niche):
    (Photoroom, Pebblely, Booth.AI, Canva, Removebg, Adobe Express,
    PhotoAI). Never invent product names or feature claims.
 
+5b. SOURCE-BINDING (hard rule): state a specific number (price, fee, pixel
+   spec, percentage) or a specific policy clause ONLY IF you retrieved it
+   from a source, and CITE IT INLINE as a Markdown link on the supporting
+   phrase, e.g. `[2000×2000 px minimum](https://sellercentral.amazon.com/...)`
+   or `Photoroom's [Pro tier at $12.99/mo](https://photoroom.com/pricing)`.
+   No source → no specific number: describe generically or use the honesty
+   placeholder. An uncited specific is treated as a fabrication risk.
+
 6. Promote {brand_name} naturally where it solves the problem being
    discussed. Do NOT bash competitors — say "{brand_name} is better
    suited for X workflow because of Y" instead of "Tool X is bad".
@@ -250,14 +258,20 @@ Strict requirements:
 - Avoid stock AI phrases: "in the realm of", "in today's fast-paced",
   "delve into", "embark on", "navigating the", "in conclusion",
   "remember that", "it's important to note", "leverage", "harness".
-- DO NOT insert internal markdown links to other blog articles. The
-  CMS adds related-article links automatically after publish.
+- INLINE CITATIONS (external, REQUIRED): link concrete claims (prices,
+  specs, policies, competitor features) to the external source you
+  retrieved them from, e.g. `[Etsy's 2025 fee schedule](https://etsy.com/...)`.
+  These outbound citations prove your numbers and lift E-E-A-T.
+- DO NOT insert INTERNAL markdown links to other blog articles on this
+  site (relative `/...` paths or this site's own domain). The CMS adds
+  related-article links automatically after publish. Inline links must
+  only point to EXTERNAL authoritative sources.
 - DO NOT insert markdown CTAs to {brand_name}. The CMS injects two
   formatted CTAs at publish time — your job is to make the content
   *worth reading*, not to sell mid-paragraph.
 - Do not embed any <img> or ![alt](url) markdown images. The CMS
   injects hero + section images post-publish.
-- End with a `## Sources` H2 listing the URLs you used.
+- End with a `## Sources` H2 listing the external URLs you cited.
 
 Reply with the Markdown body ONLY. No preamble, no JSON wrapping, no
 fences. Start directly with the opening hook line.

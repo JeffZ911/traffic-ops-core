@@ -23,11 +23,24 @@ CRITICAL FACTUAL ACCURACY RULES:
 3. DO NOT invent character names, weapon names, or game mechanics. If your
    search returns no results for a specific fact, write "[information unavailable]"
    rather than making something up.
-4. After writing, list the URLs you actually used as sources at the end of the
-   response under a "## Sources" heading. Format each as a Markdown bullet:
-   - <Title or hostname> — <full URL>
-5. Prefer official sources: official game website, official Discord, mainstream
+4. SOURCE-BINDING (hard rule): you may state a specific proper noun (character /
+   weapon / skill / banner / mechanic name) or a specific number ONLY IF it
+   appears in a source you actually retrieved. When you state such a specific,
+   CITE IT INLINE as a Markdown link on the supporting word or short phrase,
+   pointing to the REAL authoritative source URL you actually opened, e.g.
+   `the [Botany Experiment](<real-url-from-your-search>) Resonance Skill`.
+   NEVER output a placeholder, "example.com", or made-up URL — only paste
+   URLs that appeared in your actual search results. If you cannot find a
+   real source for a specific name/number, DO NOT cite a fake link and DO
+   NOT invent the fact — describe it generically (e.g. "her Resonance
+   Skill") or write "[information unavailable]". A specific claim with NO
+   inline citation is treated as a fabrication risk — prefer generic.
+5. After writing, ALSO list the URLs you cited at the end under a "## Sources"
+   heading, one Markdown bullet each: - <Title or hostname> — <full URL>
+6. Prefer official sources: official game website, official Discord, mainstream
    gaming news (IGN, GameSpot, Polygon, Game8, Game Rant), Reddit, prydwen.gg.
+   Inline citations to these authoritative sources improve E-E-A-T — use them
+   generously for every concrete, checkable claim.
 
 FACTUAL HONESTY RULE (added 2026-05-11 after 5 consecutive QA rejections
 for fabricated proper nouns):
@@ -79,15 +92,21 @@ Strict requirements:
 - Avoid stock AI phrases: "in the realm of", "in today's fast-paced",
   "delve into", "embark on", "navigating the", "in conclusion",
   "remember that", "it's important to note".
-- Be specific with numbers/effects from search results. If a number is not
-  available from search, write "[information unavailable]" rather than guessing.
-- DO NOT insert any internal links (no `<a>` tags, no markdown `[text](url)`
-  pointing to other articles on this site). The CMS adds related-article
-  links automatically after publication. External citations belong in the
-  Sources section only — not inline.
+- Be specific with numbers/effects from search results, and CITE each specific
+  inline as a Markdown link to the authoritative source (see SOURCE-BINDING).
+  If a number is not available from search, write "[information unavailable]"
+  rather than guessing.
+- INLINE CITATIONS (external, REQUIRED): link concrete claims to the external
+  source they came from, e.g. `the [Rejuvenating Flow](https://wiki/...) skill`.
+  These outbound citations are encouraged — they prove the facts and lift
+  E-E-A-T. Only link to real external sources you retrieved.
+- DO NOT insert INTERNAL links (no markdown `[text](url)` or `<a>` pointing to
+  other articles on THIS site, i.e. {site_host} or relative `/...` paths). The
+  CMS adds related-article links automatically after publication. Inline links
+  must only ever point to EXTERNAL authoritative sources.
 - Do not embed any `<img>` tags or `![alt](url)` markdown images in the
   article body. Hero and section images are added by the CMS post-publish.
-- End with a `## Sources` H2 listing the URLs you used (1 line per source).
+- End with a `## Sources` H2 listing the external URLs you cited (1 per line).
 
 Reply with the Markdown body ONLY. No preamble, no JSON wrapping, no fences.
 Start directly with the opening hook line.
@@ -168,6 +187,11 @@ class WritingAgent(BaseAgent):
                 + ban_section
             )
 
+        site_host = (
+            self.site_config.get("domain")
+            or self.site_config.get("site_url")
+            or "this site"
+        )
         prompt = PROMPT.format(
             game_name=game_name,
             factual_rules=rules,
@@ -177,6 +201,7 @@ class WritingAgent(BaseAgent):
             max_words=max_words,
             outline_json=json.dumps(outline, indent=2, ensure_ascii=False),
             feedback_block=feedback_block,
+            site_host=site_host,
         )
 
         resp = self._call_llm(

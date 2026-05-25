@@ -30,27 +30,72 @@ from src.db.model_catalog_client import get_model as get_catalog_entry
 # article (cap 7 total, ~$0.27 per article). Each inline image is keyed
 # to a specific H2 section topic so the article body can interleave them
 # at PublishAgent injection time.
-MAX_IMAGES_PER_ARTICLE = 7        # hard cost ceiling (single article)
-DEFAULT_INLINE_COUNT = 6          # default H2-section count to illustrate
+MAX_IMAGES_PER_ARTICLE = 10       # hard cost ceiling (single article)
+DEFAULT_INLINE_COUNT = 6          # fallback when caller passes no section list
 
 
-HERO_PROMPT_TEMPLATE = (
-    "Concept art for a fantasy gacha game guide article. "
-    "Theme: {topic}. "
-    "Style: digital painting, atmospheric lighting, vibrant colors with magical "
-    "highlights. No text, no logos, no human face close-ups, no copyrighted "
-    "character likenesses. Prefer abstract scenery, environments, particle effects, "
-    "or stylized objects. Aspect ratio: 16:9, dark color palette."
+# Per-niche STYLE suffixes give every image on a site a cohesive look
+# (brand consistency) and hard copyright guardrails. Kept separate from the
+# subject so the subject can be content-aware while the look stays uniform.
+_COPYRIGHT_GUARD = (
+    "Absolutely NO text, NO captions, NO logos, NO watermarks, NO UI chrome, "
+    "NO real or recognizable human faces, and NO copyrighted or trademarked "
+    "character, brand, or IP likenesses."
+)
+GAMING_STYLE = (
+    "Style: modern editorial vector/3D-render illustration, cohesive cool-tone "
+    "palette (deep indigo and teal with cyan accents), soft studio lighting, "
+    "clean composition with negative space, 16:9 horizontal. " + _COPYRIGHT_GUARD
+)
+ECOM_STYLE = (
+    "Style: clean commercial product photography / minimal flat-lay / tidy "
+    "workspace, bright neutral studio lighting, white or soft-gradient "
+    "background, modern e-commerce aesthetic, 16:9 horizontal. " + _COPYRIGHT_GUARD
 )
 
-INLINE_PROMPT_TEMPLATE = (
-    "Subject illustration for the '{topic}' section of a guide article about "
-    "{article_theme}. Style: digital painting, focused subject, atmospheric "
-    "lighting, 16:9 horizontal composition, no text, no realistic human faces, "
-    "no copyrighted character likenesses. Make the composition clearly "
-    "different from a hero/cover shot — show one specific concept or scene "
-    "from this section."
-)
+
+def _is_ecom(niche: str | None) -> bool:
+    return (niche or "gaming") == "ecommerce_tools"
+
+
+def hero_prompt(niche: str | None, title: str) -> str:
+    """Niche-aware, content-aware cover image. Avoids the old 'abstract
+    particle' emptiness by asking for concrete topic-evoking subjects."""
+    if _is_ecom(niche):
+        subject = (
+            f"Editorial cover image representing the concept of: \"{title}\". "
+            "Depict concrete relevant objects — product photos, a tidy desk "
+            "setup, packaging, or a stylized dashboard/chart — never people."
+        )
+        return f"{subject} {ECOM_STYLE}"
+    subject = (
+        f"Editorial cover image for a video-game strategy guide titled: "
+        f"\"{title}\". Depict an abstract themed scene, environment, or "
+        "stylized objects/diagram that evoke the topic — never a specific "
+        "character or person."
+    )
+    return f"{subject} {GAMING_STYLE}"
+
+
+def inline_prompt(niche: str | None, section_topic: str, article_theme: str) -> str:
+    """Section image bound to the specific H2 topic (content-aware), composed
+    to look different from the cover and to favour concrete, non-empty visuals
+    (diagrams, charts, scenes, product shots) over vague atmosphere."""
+    if _is_ecom(niche):
+        subject = (
+            f"Section illustration for the '{section_topic}' part of an article "
+            f"about {article_theme}. Show one concrete relevant visual: a "
+            "product shot, a before/after, a stylized data chart, or a "
+            "workflow-step scene — never people."
+        )
+        return f"{subject} Compose clearly differently from a cover shot. {ECOM_STYLE}"
+    subject = (
+        f"Section illustration for the '{section_topic}' part of a game guide "
+        f"about {article_theme}. Show one specific concept, scene, stylized "
+        "diagram, or interface motif from this section — never a copyrighted "
+        "character or person."
+    )
+    return f"{subject} Compose clearly differently from a cover shot. {GAMING_STYLE}"
 
 
 def _save_image(raw_bytes: bytes, dest_path: Path) -> int:
@@ -170,8 +215,12 @@ class ImageAgent(BaseAgent):
         # can pass `inline_count` to override, but it's clamped to
         # MAX_IMAGES_PER_ARTICLE - 1 so a single article can never exceed
         # the cost ceiling.
+        # Structure-driven: illustrate one image per H2 section by default
+        # (so image count tracks the article's real structure), clamped to
+        # the per-article ceiling. Caller may still override with inline_count.
+        default_inline = len(section_topics) if section_topics else DEFAULT_INLINE_COUNT
         n_inline = min(
-            int(input_data.get("inline_count", DEFAULT_INLINE_COUNT)),
+            int(input_data.get("inline_count", default_inline)),
             MAX_IMAGES_PER_ARTICLE - 1,
         )
 
@@ -191,14 +240,16 @@ class ImageAgent(BaseAgent):
         results: list[dict] = []
         total_cost = 0.0
 
+        niche = self.site_config.get("niche") or "gaming"
+
         # 1) Hero
-        hero_prompt = HERO_PROMPT_TEMPLATE.format(topic=title)
-        bytes_, meta = self._generate_image(hero_prompt)
+        hero_prompt_text = hero_prompt(niche, title)
+        bytes_, meta = self._generate_image(hero_prompt_text)
         hero_path = out_dir / "hero.webp"
         size = _save_image(bytes_, hero_path)
         url_path = f"/{out_dir_rel}/hero.webp"
         self._record_image(
-            site_id=site_id, article_id=article_id, prompt=hero_prompt,
+            site_id=site_id, article_id=article_id, prompt=hero_prompt_text,
             url=url_path, alt_text=f"{title} – cover illustration",
             provider=provider, model=model, aspect_ratio="16:9",
             cost_usd=per_image_cost,
@@ -213,7 +264,7 @@ class ImageAgent(BaseAgent):
         # is bound to a specific H2 by index so PublishAgent can interleave
         # them with the matching section at injection time.
         for i, topic in enumerate(section_topics[:n_inline], start=1):
-            prompt = INLINE_PROMPT_TEMPLATE.format(topic=topic, article_theme=title)
+            prompt = inline_prompt(niche, topic, title)
             try:
                 bytes_, meta = self._generate_image(prompt)
             except Exception as e:
