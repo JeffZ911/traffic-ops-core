@@ -243,6 +243,7 @@ def main() -> int:
                     "article_type": atype,
                     "section_topics": topics,
                     "inline_count": args.inline,
+                    "game": (outline or {}).get("game"),
                 },
             )
         except Exception as e:

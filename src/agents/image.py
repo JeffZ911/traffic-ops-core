@@ -34,18 +34,38 @@ MAX_IMAGES_PER_ARTICLE = 10       # hard cost ceiling (single article)
 DEFAULT_INLINE_COUNT = 6          # fallback when caller passes no section list
 
 
-# Per-niche STYLE suffixes give every image on a site a cohesive look
-# (brand consistency) and hard copyright guardrails. Kept separate from the
-# subject so the subject can be content-aware while the look stays uniform.
+# Copyright guard: the legal line is the IP's *specific named characters* and
+# logos — anime *style* itself is not protected. So we allow rich, original
+# anime scenes (generic adventurers, environments, FX) and only forbid the
+# game's actual characters / trademarks / text.
 _COPYRIGHT_GUARD = (
-    "Absolutely NO text, NO captions, NO logos, NO watermarks, NO UI chrome, "
-    "NO real or recognizable human faces, and NO copyrighted or trademarked "
-    "character, brand, or IP likenesses."
+    "Hard rules: NO text, NO captions, NO logos, NO watermarks, NO UI overlays, "
+    "NO real photographic people. Do NOT depict the game's actual named or "
+    "copyrighted characters, and do not make any figure recognizable as an "
+    "existing IP character — use ONLY original, generic characters. No "
+    "trademarked logos or brand marks."
 )
-GAMING_STYLE = (
-    "Style: modern editorial vector/3D-render illustration, cohesive cool-tone "
-    "palette (deep indigo and teal with cyan accents), soft studio lighting, "
-    "clean composition with negative space, 16:9 horizontal. " + _COPYRIGHT_GUARD
+
+# Per-game art direction so each game looks like itself (key-art vibe) instead
+# of one flat palette. Operator can override per game via
+# sites.config.game_metadata[slug].art_style.
+GAME_ART_STYLE: dict[str, str] = {
+    "genshin": "vibrant high-fantasy anime style, lush painterly landscapes, glowing elemental magic effects, bright saturated color",
+    "hsr": "sci-fi space-fantasy anime style, sleek cosmic / interstellar environments, neon astral energy effects",
+    "zzz": "stylish urban cyberpunk anime style, neon-lit city, bold graphic energy and motion",
+    "wuthering_waves": "post-apocalyptic anime style, windswept ruins reclaimed by nature, resonant energy effects",
+    "nte": "modern supernatural anime style, near-future urban-fantasy settings, mysterious atmosphere",
+}
+_DEFAULT_GAME_ART = (
+    "polished high-fantasy anime style, cinematic environments, dramatic "
+    "elemental effects, rich saturated color"
+)
+# One consistent render quality across gaming images (without flattening the
+# per-game palette above).
+GAMING_RENDER = (
+    "Polished anime-style key-art digital illustration, cinematic dramatic "
+    "lighting, atmospheric depth, dynamic composition, highly detailed, "
+    "16:9 horizontal."
 )
 ECOM_STYLE = (
     "Style: clean commercial product photography / minimal flat-lay / tidy "
@@ -58,9 +78,18 @@ def _is_ecom(niche: str | None) -> bool:
     return (niche or "gaming") == "ecommerce_tools"
 
 
-def hero_prompt(niche: str | None, title: str) -> str:
-    """Niche-aware, content-aware cover image. Avoids the old 'abstract
-    particle' emptiness by asking for concrete topic-evoking subjects."""
+def resolve_art_style(game: str | None, site_config: dict | None = None) -> str:
+    """Per-game art direction: operator override → builtin map → default."""
+    if site_config:
+        meta = (site_config.get("game_metadata") or {}).get(game or "", {}) or {}
+        if meta.get("art_style"):
+            return str(meta["art_style"])
+    return GAME_ART_STYLE.get((game or "").lower(), _DEFAULT_GAME_ART)
+
+
+def hero_prompt(niche: str | None, title: str, *, art_style: str | None = None) -> str:
+    """Niche-aware cover image. Gaming = original anime key-art that actually
+    depicts the topic's setting/action (not abstract emptiness)."""
     if _is_ecom(niche):
         subject = (
             f"Editorial cover image representing the concept of: \"{title}\". "
@@ -68,19 +97,26 @@ def hero_prompt(niche: str | None, title: str) -> str:
             "setup, packaging, or a stylized dashboard/chart — never people."
         )
         return f"{subject} {ECOM_STYLE}"
+    style = art_style or _DEFAULT_GAME_ART
     subject = (
-        f"Editorial cover image for a video-game strategy guide titled: "
-        f"\"{title}\". Depict an abstract themed scene, environment, or "
-        "stylized objects/diagram that evoke the topic — never a specific "
-        "character or person."
+        f"Dynamic key-art cover illustration for a game guide titled: \"{title}\". "
+        f"Depict an original, evocative scene in {style} — show the relevant "
+        "setting, elemental powers, weapons, or original adventurers (generic, "
+        "shown from behind, in silhouette, or stylized). Make it vivid, "
+        "cinematic and clearly on-topic — not abstract, not empty."
     )
-    return f"{subject} {GAMING_STYLE}"
+    return f"{subject} {GAMING_RENDER} {_COPYRIGHT_GUARD}"
 
 
-def inline_prompt(niche: str | None, section_topic: str, article_theme: str) -> str:
-    """Section image bound to the specific H2 topic (content-aware), composed
-    to look different from the cover and to favour concrete, non-empty visuals
-    (diagrams, charts, scenes, product shots) over vague atmosphere."""
+def inline_prompt(
+    niche: str | None,
+    section_topic: str,
+    article_theme: str,
+    *,
+    art_style: str | None = None,
+) -> str:
+    """Section image bound to the specific H2 topic, composed differently from
+    the cover, favouring vivid concrete scenes over vague atmosphere."""
     if _is_ecom(niche):
         subject = (
             f"Section illustration for the '{section_topic}' part of an article "
@@ -89,13 +125,15 @@ def inline_prompt(niche: str | None, section_topic: str, article_theme: str) -> 
             "workflow-step scene — never people."
         )
         return f"{subject} Compose clearly differently from a cover shot. {ECOM_STYLE}"
+    style = art_style or _DEFAULT_GAME_ART
     subject = (
-        f"Section illustration for the '{section_topic}' part of a game guide "
-        f"about {article_theme}. Show one specific concept, scene, stylized "
-        "diagram, or interface motif from this section — never a copyrighted "
-        "character or person."
+        f"Illustration for the '{section_topic}' section of a guide about "
+        f"{article_theme}. An original {style} scene that concretely depicts "
+        "this section's idea — a setting, an action, an elemental effect, a "
+        "weapon, or original generic adventurers. Vivid and specific, not "
+        "abstract; clearly different composition from the cover."
     )
-    return f"{subject} Compose clearly differently from a cover shot. {GAMING_STYLE}"
+    return f"{subject} {GAMING_RENDER} {_COPYRIGHT_GUARD}"
 
 
 def _save_image(raw_bytes: bytes, dest_path: Path) -> int:
@@ -241,9 +279,13 @@ class ImageAgent(BaseAgent):
         total_cost = 0.0
 
         niche = self.site_config.get("niche") or "gaming"
+        # Per-game art direction (gaming only): game comes from the orchestrator
+        # or from the article's outline jsonb (outline.game).
+        game = input_data.get("game") or (input_data.get("outline") or {}).get("game")
+        art_style = None if _is_ecom(niche) else resolve_art_style(game, self.site_config)
 
         # 1) Hero
-        hero_prompt_text = hero_prompt(niche, title)
+        hero_prompt_text = hero_prompt(niche, title, art_style=art_style)
         bytes_, meta = self._generate_image(hero_prompt_text)
         hero_path = out_dir / "hero.webp"
         size = _save_image(bytes_, hero_path)
@@ -264,7 +306,7 @@ class ImageAgent(BaseAgent):
         # is bound to a specific H2 by index so PublishAgent can interleave
         # them with the matching section at injection time.
         for i, topic in enumerate(section_topics[:n_inline], start=1):
-            prompt = inline_prompt(niche, topic, title)
+            prompt = inline_prompt(niche, topic, title, art_style=art_style)
             try:
                 bytes_, meta = self._generate_image(prompt)
             except Exception as e:
