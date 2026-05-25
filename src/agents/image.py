@@ -60,17 +60,26 @@ _DEFAULT_GAME_ART = (
     "polished high-fantasy anime style, cinematic environments, dramatic "
     "elemental effects, rich saturated color"
 )
-# One consistent render quality across gaming images (without flattening the
-# per-game palette above).
+# Quality bar applied to EVERY image regardless of niche/style. The look may
+# vary with the content (that's wanted) but it must always be refined.
+_QUALITY = (
+    "Professional, highly detailed, polished and visually striking, "
+    "magazine / key-art quality, tasteful composition, 16:9 horizontal."
+)
+# Gaming render: anime key-art, but the scene/style adapts to the content.
 GAMING_RENDER = (
     "Polished anime-style key-art digital illustration, cinematic dramatic "
-    "lighting, atmospheric depth, dynamic composition, highly detailed, "
-    "16:9 horizontal."
+    "lighting, atmospheric depth, dynamic composition. " + _QUALITY
 )
+# Ecommerce: let the FORMAT follow the content (product shot, flat-lay,
+# before/after, UI mockup, infographic) instead of one rigid look — but always
+# high-end and clean.
 ECOM_STYLE = (
-    "Style: clean commercial product photography / minimal flat-lay / tidy "
-    "workspace, bright neutral studio lighting, white or soft-gradient "
-    "background, modern e-commerce aesthetic, 16:9 horizontal. " + _COPYRIGHT_GUARD
+    "Style: pick the format that best fits this specific content — a clean "
+    "studio product shot, a tasteful flat-lay, a before/after split, a sleek "
+    "app/dashboard mockup, or a minimal infographic — rendered in a modern, "
+    "high-end e-commerce editorial look with bright clean lighting. "
+    + _QUALITY + " " + _COPYRIGHT_GUARD
 )
 
 
