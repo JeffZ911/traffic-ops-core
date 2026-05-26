@@ -9,23 +9,23 @@ name: Ingest affiliate keywords (one-shot)
 #
 # Idempotent: re-running skips keywords whose text already exists (case
 # insensitive). Safe to run after editing the CSV.
+#
+# Inputs use plain-string types to match the proven pattern in
+# banner_batch.yml — newer `type: choice` / `type: boolean` workflow_dispatch
+# inputs trigger HTTP 500 on dispatch in this account's GitHub env, so we
+# stick with the boring-and-works approach.
 
 on:
   workflow_dispatch:
     inputs:
       site_domain:
-        description: 'Site domain to ingest into'
+        description: 'Site domain to ingest into (ntecodex.com or pixelmatch.art)'
         required: true
         default: 'ntecodex.com'
-        type: choice
-        options:
-          - ntecodex.com
-          - pixelmatch.art
       dry_run:
-        description: 'Dry run (count only, no DB writes)'
-        required: false
-        default: false
-        type: boolean
+        description: 'Dry run? Type "true" for count-only, "false" to actually insert'
+        required: true
+        default: 'false'
 
 jobs:
   ingest:
@@ -49,13 +49,13 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             python -m scripts.ingest_affiliate_keywords \
-              --site-domain "${{ inputs.site_domain }}" \
+              --site-domain "${{ github.event.inputs.site_domain }}" \
               --dry-run
           else
             python -m scripts.ingest_affiliate_keywords \
-              --site-domain "${{ inputs.site_domain }}"
+              --site-domain "${{ github.event.inputs.site_domain }}"
           fi
 
       - name: Summary
@@ -63,8 +63,8 @@ jobs:
         run: |
           echo "## Affiliate keyword ingestion" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Site: \`${{ inputs.site_domain }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Dry run: \`${{ inputs.dry_run }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Site: \`${{ github.event.inputs.site_domain }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Dry run: \`${{ github.event.inputs.dry_run }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Source: \`data/affiliate_keywords.csv\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Next: the next \`content_daily\` cron (every 4h) will start picking the new keywords for \`article_type=comparison\` roundups via OutlineAgent's COMPARISON_PROMPT." >> "$GITHUB_STEP_SUMMARY"
+          echo "Next: \`content_daily\` cron (every 4h) starts picking the new keywords for \`article_type=comparison\` roundups via OutlineAgent's COMPARISON_PROMPT." >> "$GITHUB_STEP_SUMMARY"
