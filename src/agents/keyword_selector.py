@@ -246,6 +246,53 @@ def _type_adjustment(stats: dict[str, Any] | None) -> tuple[float, str]:
     return 0.0, f"pass_rate={rate:.0%}"
 
 
+# ── Duplicate-topic guard ────────────────────────────────────────────────
+# Root-caused the 15-20 near-identical "Nanally build" articles: nothing
+# stopped the selector from picking a keyword whose topic was already covered.
+# We reduce a keyword to a "signature" of significant tokens (drop generic
+# scaffolding but KEEP discriminating gameplay words like build/vs/tier) and
+# skip a candidate if it overlaps an already-published title too much.
+import re as _re
+
+_GENERIC_TOKENS = {
+    "the", "a", "an", "for", "to", "of", "in", "on", "and", "or", "with",
+    "your", "you", "is", "are", "how", "what", "why", "when", "where", "who",
+    "guide", "best", "top", "complete", "ultimate", "2026", "2025", "nte",
+    "neverness", "everness", "game", "gaming", "explained", "tips", "tricks",
+    "new", "latest", "update", "all",
+}
+
+
+def _topic_signature(text: str) -> frozenset[str]:
+    """Significant-token set of a keyword/title (lowercased, generic words +
+    pure numbers/dates dropped). Keeps gameplay-discriminating words so
+    'X build' and 'X vs Y' stay distinct."""
+    toks = _re.findall(r"[a-z0-9]+", (text or "").lower())
+    return frozenset(
+        t for t in toks
+        if t not in _GENERIC_TOKENS and not t.isdigit() and len(t) >= 3
+    )
+
+
+def _is_duplicate_topic(
+    sig: frozenset[str], published_sigs: list[frozenset[str]], threshold: float = 0.6
+) -> bool:
+    """True if `sig` overlaps any published signature at/above `threshold`
+    (Jaccard), or is a subset of one (already fully covered). Empty sigs
+    (all-generic keywords) are never treated as duplicates."""
+    if not sig:
+        return False
+    for ps in published_sigs:
+        if not ps:
+            continue
+        if sig <= ps:  # candidate fully covered by an existing topic
+            return True
+        inter = len(sig & ps)
+        if inter and inter / len(sig | ps) >= threshold:
+            return True
+    return False
+
+
 class KeywordSelectorAgent(BaseAgent):
     name = "keyword_selector"
     task_type = "keyword_selection"
@@ -305,6 +352,22 @@ class KeywordSelectorAgent(BaseAgent):
             if not cand_rows:
                 raise RuntimeError("No keywords with status='planned' available")
 
+            # Duplicate-topic guard: signatures of already-published titles
+            # (and their source keywords) so we never re-pick a covered topic.
+            cur.execute(
+                "select title, keyword from articles a "
+                "left join article_keywords ak on ak.article_id = a.id "
+                "left join keywords k on k.id = ak.keyword_id "
+                "where a.site_id = %s and a.status = 'published'",
+                (str(site_id),),
+            )
+            published_sigs = []
+            for t, k in cur.fetchall():
+                for txt in (t, k):
+                    s = _topic_signature(txt or "")
+                    if s:
+                        published_sigs.append(s)
+
             # Heuristic: infer the keyword's likely article_type from its
             # text/intent so we can apply the type-rate adjustment to its
             # priority BEFORE the LLM sees the list. Coarse but enough
@@ -347,6 +410,9 @@ class KeywordSelectorAgent(BaseAgent):
                 )
                 guessed_type = _guess_type(kw, intent)
                 if guessed_type and guessed_type in effective_blacklist:
+                    continue
+                # Skip topics already covered by a published article (dedup).
+                if _is_duplicate_topic(_topic_signature(kw), published_sigs):
                     continue
                 base = float(pri) if pri is not None else 0.0
                 gsc_bonus = GSC_LONGTAIL_BONUS if src == "gsc_longtail" else 0.0
