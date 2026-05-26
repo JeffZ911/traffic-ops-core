@@ -1,0 +1,372 @@
+{
+  "products": [
+    {
+      "category": "gaming_chairs",
+      "name": "Secretlab TITAN Evo 2022 Regular",
+      "asin": "B0B5DPVR4M",
+      "image_url": "https://m.media-amazon.com/images/I/61eYqU3UmZL._AC_SL1500_.jpg",
+      "price_band": "$500-600",
+      "rating_approx": 4.6,
+      "best_for_tags": ["all_body_types", "warranty", "premium", "wfh_back_pain", "mmo_players", "gacha_grinders"],
+      "asin_confidence": "low",
+      "notes": "Top default pick — used as anchor in any 'best chair' roundup. ASIN may be refreshed/variant-swapped frequently on Amazon; Secretlab also sells direct off-Amazon — verify availability before use."
+    },
+    {
+      "category": "gaming_chairs",
+      "name": "Secretlab TITAN Evo 2022 XL",
+      "asin": "B0B5DT5MTM",
+      "image_url": "https://m.media-amazon.com/images/I/61eYqU3UmZL._AC_SL1500_.jpg",
+      "price_band": "$600-700",
+      "rating_approx": 4.6,
+      "best_for_tags": ["tall_users", "heavyweight_users", "premium"],
+      "asin_confidence": "low",
+      "notes": "Tall/heavyweight pick. Verify XL ASIN — Secretlab variants get re-listed often."
+    },
+    {
+      "category": "gaming_chairs",
+      "name": "Razer Iskur V2",
+      "asin": "B0CHFB8FJN",
+      "image_url": "https://m.media-amazon.com/images/I/71x2QQqKkfL._AC_SL1500_.jpg",
+      "price_band": "$600-700",
+      "rating_approx": 4.4,
+      "best_for_tags": ["wfh_back_pain", "posture_focused", "premium", "streamers"],
+      "asin_confidence": "low",
+      "notes": "Built-in lumbar — popular with streamer/wfh crossover. Verify ASIN."
+    },
+    {
+      "category": "gaming_chairs",
+      "name": "Herman Miller Embody Gaming Chair (Logitech G Edition)",
+      "asin": "B08FXJYNT4",
+      "image_url": "https://m.media-amazon.com/images/I/61Xz0wjGoIL._AC_SL1500_.jpg",
+      "price_band": "$1500-1800",
+      "rating_approx": 4.5,
+      "best_for_tags": ["premium_buyers", "ergo_premium", "wfh_back_pain", "posture_focused", "sciatica_sufferers"],
+      "asin_confidence": "low",
+      "notes": "Top of premium tier — pairs with 'under $1000+' / 'best ergonomic' content. ASIN may have changed; verify."
+    },
+    {
+      "category": "gaming_chairs",
+      "name": "Steelcase Gesture",
+      "asin": "B08F5MM4CY",
+      "image_url": "https://m.media-amazon.com/images/I/71l8rCkPdML._AC_SL1500_.jpg",
+      "price_band": "$1300-1600",
+      "rating_approx": 4.5,
+      "best_for_tags": ["wfh_back_pain", "ergo_premium", "premium_buyers", "posture_focused", "wrist_pain"],
+      "asin_confidence": "low",
+      "notes": "Not a 'gaming' chair but ergo crossover for long gacha/mmo sessions. ASIN highly variable on Amazon — Steelcase mostly sells via authorized dealers."
+    },
+    {
+      "category": "gaming_chairs",
+      "name": "Branch Ergonomic Chair",
+      "asin": "B08T7DBN1L",
+      "image_url": "https://m.media-amazon.com/images/I/61w4DfsKLOL._AC_SL1500_.jpg",
+      "price_band": "$300-400",
+      "rating_approx": 4.4,
+      "best_for_tags": ["budget_under_500", "wfh_gamer", "wfh_back_pain", "minimalist_wfh"],
+      "asin_confidence": "low",
+      "notes": "Strong sub-$400 ergonomic pick. Branch primarily DTC — Amazon listings inconsistent; verify."
+    },
+    {
+      "category": "gaming_chairs",
+      "name": "Vitesse Gaming Chair with Footrest",
+      "asin": "B07YFGYTKV",
+      "image_url": "https://m.media-amazon.com/images/I/71G+aPN3TtL._AC_SL1500_.jpg",
+      "price_band": "$150-250",
+      "rating_approx": 4.3,
+      "best_for_tags": ["budget_under_200", "budget_under_300", "teen_gamers", "college_students", "budget_recliner"],
+      "asin_confidence": "low",
+      "notes": "Budget recliner with footrest for teen/dorm tier. Verify — generic listings churn."
+    },
+    {
+      "category": "keyboards_mice",
+      "name": "Razer Naga V2 Pro Wireless MMO Mouse",
+      "asin": "B0B6BR9N9F",
+      "image_url": "https://m.media-amazon.com/images/I/61X3wB0swrL._AC_SL1500_.jpg",
+      "price_band": "$150-180",
+      "rating_approx": 4.4,
+      "best_for_tags": ["mmo_players", "mmo_budget", "gacha_grinders", "wfh_mmo"],
+      "notes": "Default anchor for any MMO mouse roundup. Swappable side plates (2/6/12 buttons)."
+    },
+    {
+      "category": "keyboards_mice",
+      "name": "Logitech G502 X PLUS Wireless",
+      "asin": "B0B5L7DSQX",
+      "image_url": "https://m.media-amazon.com/images/I/61Wkj2u-OBL._AC_SL1500_.jpg",
+      "price_band": "$130-160",
+      "rating_approx": 4.6,
+      "best_for_tags": ["palm_grip_large", "fps_competitive", "hybrid_use", "mmo_players"],
+      "notes": "Versatile mid-MMO/FPS hybrid. Widely available."
+    },
+    {
+      "category": "keyboards_mice",
+      "name": "Logitech G Pro X Superlight 2",
+      "asin": "B0CKMS3HJV",
+      "image_url": "https://m.media-amazon.com/images/I/61CT-NJgYjL._AC_SL1500_.jpg",
+      "price_band": "$150-180",
+      "rating_approx": 4.6,
+      "best_for_tags": ["fps_competitive", "valorant_players", "lightweight_seekers", "claw_grip"],
+      "asin_confidence": "low",
+      "notes": "Default FPS/Valorant pick. Verify ASIN — Superlight 2 launched 2024 and re-listed."
+    },
+    {
+      "category": "keyboards_mice",
+      "name": "Keychron Q1 Pro Wireless Mechanical Keyboard",
+      "asin": "B0C2QQSDP3",
+      "image_url": "https://m.media-amazon.com/images/I/71JGgEX7lYL._AC_SL1500_.jpg",
+      "price_band": "$200-230",
+      "rating_approx": 4.5,
+      "best_for_tags": ["hotswap_enthusiasts", "mac_users", "wfh_coders", "hybrid_typist"],
+      "asin_confidence": "low",
+      "notes": "Premium 75% hotswap, Mac-friendly. Keychron primarily DTC; Amazon listings exist but variable."
+    },
+    {
+      "category": "keyboards_mice",
+      "name": "Keychron K2 V2 Wireless Mechanical Keyboard",
+      "asin": "B08D6MXWQK",
+      "image_url": "https://m.media-amazon.com/images/I/71kQp8jZG8L._AC_SL1500_.jpg",
+      "price_band": "$80-100",
+      "rating_approx": 4.5,
+      "best_for_tags": ["budget_students", "hotswap_beginners", "mac_users", "laptop_users", "ipad_gachas"],
+      "asin_confidence": "low",
+      "notes": "Entry-level wireless mech. ASIN may have been refreshed to K2 Pro/V3."
+    },
+    {
+      "category": "keyboards_mice",
+      "name": "Glorious GMMK Pro 75% Barebones",
+      "asin": "B08X6L1RTQ",
+      "image_url": "https://m.media-amazon.com/images/I/71YQHTSphwL._AC_SL1500_.jpg",
+      "price_band": "$170-200",
+      "rating_approx": 4.3,
+      "best_for_tags": ["hotswap_enthusiasts", "ergo_feature_seekers", "streamers"],
+      "asin_confidence": "low",
+      "notes": "Rotary knob, gasket-mount, customization angle. Verify ASIN — multiple SKU variants."
+    },
+    {
+      "category": "keyboards_mice",
+      "name": "Razer Huntsman V3 Pro TKL",
+      "asin": "B0CN13VC2W",
+      "image_url": "https://m.media-amazon.com/images/I/71PrlmGEFRL._AC_SL1500_.jpg",
+      "price_band": "$200-250",
+      "rating_approx": 4.4,
+      "best_for_tags": ["fps_competitive", "valorant_players", "hall_effect_seekers", "spec_seekers"],
+      "asin_confidence": "low",
+      "notes": "Analog/magnetic switches — covers magnetic + hall effect search clusters. Verify."
+    },
+    {
+      "category": "monitors_displays",
+      "name": "LG 27GP850-B 27\" UltraGear 1440p 165Hz Nano IPS",
+      "asin": "B093K8YGYK",
+      "image_url": "https://m.media-amazon.com/images/I/81VkqVxh9zL._AC_SL1500_.jpg",
+      "price_band": "$350-450",
+      "rating_approx": 4.6,
+      "best_for_tags": ["spec_seekers", "color_seekers", "genshin_pc", "hsr_players", "budget_mmo", "wfh_gamer"],
+      "notes": "Default 1440p anchor for 'best monitor under $400' content."
+    },
+    {
+      "category": "monitors_displays",
+      "name": "Gigabyte M27Q 27\" 1440p 170Hz KVM",
+      "asin": "B08TVH7DPX",
+      "image_url": "https://m.media-amazon.com/images/I/81rj7DLmclL._AC_SL1500_.jpg",
+      "price_band": "$280-350",
+      "rating_approx": 4.5,
+      "best_for_tags": ["budget_mmo", "kvm_seekers", "wfh_gamer", "wfh_mmo", "spec_seekers"],
+      "notes": "KVM + 1440p high refresh — strong dual-PC streamer/wfh story."
+    },
+    {
+      "category": "monitors_displays",
+      "name": "LG 34GP83A-B 34\" UltraGear Curved Ultrawide 1440p 160Hz",
+      "asin": "B08L8KBVZ8",
+      "image_url": "https://m.media-amazon.com/images/I/91hpMVy43DL._AC_SL1500_.jpg",
+      "price_band": "$700-900",
+      "rating_approx": 4.6,
+      "best_for_tags": ["mmo_players", "ff14_players", "wow_players", "mmo_ultrawide", "eye_strain"],
+      "asin_confidence": "low",
+      "notes": "MMO ultrawide anchor. Verify — LG SKU codes drift."
+    },
+    {
+      "category": "monitors_displays",
+      "name": "ASUS ROG Swift OLED PG27AQDM 27\" 1440p 240Hz QD-OLED",
+      "asin": "B0CDXJZQSL",
+      "image_url": "https://m.media-amazon.com/images/I/81HsLgL0vDL._AC_SL1500_.jpg",
+      "price_band": "$900-1100",
+      "rating_approx": 4.5,
+      "best_for_tags": ["oled_gacha", "premium_gacha", "jrpg_audiophile", "fps_competitive", "color_seekers"],
+      "asin_confidence": "low",
+      "notes": "OLED tier anchor. Verify ASIN — premium displays change SKUs often."
+    },
+    {
+      "category": "monitors_displays",
+      "name": "Alienware AW2725DF 27\" 360Hz QD-OLED 1440p",
+      "asin": "B0CRRZ55ND",
+      "image_url": "https://m.media-amazon.com/images/I/61Hlam5b1OL._AC_SL1500_.jpg",
+      "price_band": "$800-1000",
+      "rating_approx": 4.4,
+      "best_for_tags": ["fps_competitive", "valorant_players", "oled_gacha", "premium_gacha"],
+      "asin_confidence": "low",
+      "notes": "360Hz OLED — esports premium. Verify ASIN."
+    },
+    {
+      "category": "monitors_displays",
+      "name": "ASUS TUF Gaming VG279Q1A 27\" 1080p 165Hz",
+      "asin": "B08MFB7XS6",
+      "image_url": "https://m.media-amazon.com/images/I/81LXJB3vKDL._AC_SL1500_.jpg",
+      "price_band": "$150-200",
+      "rating_approx": 4.5,
+      "best_for_tags": ["budget_under_200", "college_students", "kid_gamers", "budget_fps"],
+      "notes": "Default sub-$200 1080p pick."
+    },
+    {
+      "category": "monitors_displays",
+      "name": "ASUS ZenScreen MB16ACE 15.6\" Portable USB-C Monitor",
+      "asin": "B07L9X5N9T",
+      "image_url": "https://m.media-amazon.com/images/I/81nGZSRKvWL._AC_SL1500_.jpg",
+      "price_band": "$180-250",
+      "rating_approx": 4.5,
+      "best_for_tags": ["portable_gacha", "steam_deck_users", "ipad_gachas", "laptop_users", "cafe_gamers"],
+      "asin_confidence": "low",
+      "notes": "Portable monitor anchor — Steam Deck/Switch crossover. Verify."
+    },
+    {
+      "category": "audio_headphones",
+      "name": "SteelSeries Arctis Nova Pro Wireless",
+      "asin": "B0B3SQ2P6S",
+      "image_url": "https://m.media-amazon.com/images/I/61U-aTBRY-L._AC_SL1500_.jpg",
+      "price_band": "$300-380",
+      "rating_approx": 4.4,
+      "best_for_tags": ["mmo_players", "premium_buyers", "wfh_mmo", "streamers", "vtubers", "mmo_raid_leaders"],
+      "notes": "Premium MMO/streamer anchor — hot-swap battery story."
+    },
+    {
+      "category": "audio_headphones",
+      "name": "SteelSeries Arctis Nova 7 Wireless",
+      "asin": "B0B4NJ9YT9",
+      "image_url": "https://m.media-amazon.com/images/I/61CYEqj7uoL._AC_SL1500_.jpg",
+      "price_band": "$150-180",
+      "rating_approx": 4.5,
+      "best_for_tags": ["mmo_players", "wfh_mmo", "wfh_gamer", "long_session_seekers", "gacha_grinders", "ear_pain"],
+      "notes": "Mid-tier wireless workhorse. Strong long-session comfort story."
+    },
+    {
+      "category": "audio_headphones",
+      "name": "HyperX Cloud III",
+      "asin": "B0C3JCQ74S",
+      "image_url": "https://m.media-amazon.com/images/I/71pZmTLAyOL._AC_SL1500_.jpg",
+      "price_band": "$80-100",
+      "rating_approx": 4.6,
+      "best_for_tags": ["mmo_budget", "budget_students", "college_students", "glasses_wearers", "teen_gamers"],
+      "notes": "Sub-$100 wired anchor. Comfort with glasses is a known strength."
+    },
+    {
+      "category": "audio_headphones",
+      "name": "Sennheiser HD 560S Open-Back Headphones",
+      "asin": "B08DK831F4",
+      "image_url": "https://m.media-amazon.com/images/I/71nVfyZWQ-L._AC_SL1500_.jpg",
+      "price_band": "$180-220",
+      "rating_approx": 4.6,
+      "best_for_tags": ["audiophile_jrpg", "audiophile_mmo", "genshin_audiophile", "hsr_audiophile", "jrpg_audiophile", "gacha_grinders"],
+      "notes": "Open-back audiophile crossover. Pair with mic for streamer/vtuber content."
+    },
+    {
+      "category": "audio_headphones",
+      "name": "Beyerdynamic DT 770 PRO 80 Ohm",
+      "asin": "B0016MNAAI",
+      "image_url": "https://m.media-amazon.com/images/I/61f0vlEy5wL._AC_SL1500_.jpg",
+      "price_band": "$150-180",
+      "rating_approx": 4.7,
+      "best_for_tags": ["late_night_gamers", "shared_apt", "streamer_monitoring", "audiophile_mmo"],
+      "notes": "Closed-back audiophile workhorse — long-tail evergreen anchor."
+    },
+    {
+      "category": "audio_headphones",
+      "name": "Shure MV7+ USB/XLR Microphone",
+      "asin": "B0CMTRXBM4",
+      "image_url": "https://m.media-amazon.com/images/I/71qIWLwjQQL._AC_SL1500_.jpg",
+      "price_band": "$250-300",
+      "rating_approx": 4.6,
+      "best_for_tags": ["streamer_upgrade", "streamers", "vtubers", "gacha_streamers", "mmo_leaders"],
+      "asin_confidence": "low",
+      "notes": "Streamer-tier mic for under-$300 content. Verify — MV7+ launched late 2024."
+    },
+    {
+      "category": "audio_headphones",
+      "name": "Shokz OpenRun Pro Bone Conduction Headphones",
+      "asin": "B09HMTM2QM",
+      "image_url": "https://m.media-amazon.com/images/I/61WJqRJYwgL._AC_SL1500_.jpg",
+      "price_band": "$130-180",
+      "rating_approx": 4.5,
+      "best_for_tags": ["mobile_gachas", "hsr_mobile", "genshin_mobile", "shared_apt", "ear_pain"],
+      "notes": "Niche pick for mobile gacha + ambient awareness."
+    },
+    {
+      "category": "desk_ergonomics",
+      "name": "FlexiSpot E7 Pro Plus Standing Desk Frame",
+      "asin": "B0BTBJM7LF",
+      "image_url": "https://m.media-amazon.com/images/I/71+aMW7YqVL._AC_SL1500_.jpg",
+      "price_band": "$400-550",
+      "rating_approx": 4.7,
+      "best_for_tags": ["wfh_gamer", "tall_users", "mmo_players", "gacha_grinders", "standing_grinders", "ergo_setup"],
+      "asin_confidence": "low",
+      "notes": "Default standing desk frame anchor. Verify ASIN — FlexiSpot frequently re-lists SKUs."
+    },
+    {
+      "category": "desk_ergonomics",
+      "name": "VIVO Dual Monitor Desk Mount (STAND-V002)",
+      "asin": "B00MIBN71I",
+      "image_url": "https://m.media-amazon.com/images/I/71t1Z8VlrEL._AC_SL1500_.jpg",
+      "price_band": "$30-50",
+      "rating_approx": 4.6,
+      "best_for_tags": ["dual_monitor_gacha", "mmo_secondary", "streamers", "desk_organization", "small_desk"],
+      "notes": "Sub-$50 dual monitor arm — evergreen budget pick."
+    },
+    {
+      "category": "desk_ergonomics",
+      "name": "Ergotron LX Single Monitor Arm",
+      "asin": "B00358RILY",
+      "image_url": "https://m.media-amazon.com/images/I/71qZ45MqOML._AC_SL1500_.jpg",
+      "price_band": "$140-180",
+      "rating_approx": 4.7,
+      "best_for_tags": ["mmo_ultrawide", "ergo_setup", "wfh_gamer", "premium_buyers", "spec_seekers"],
+      "notes": "Premium single arm anchor — handles ultrawide weight."
+    },
+    {
+      "category": "desk_ergonomics",
+      "name": "BenQ ScreenBar Halo Monitor Light Bar",
+      "asin": "B09NNFLT4P",
+      "image_url": "https://m.media-amazon.com/images/I/61BJlmRMRBL._AC_SL1500_.jpg",
+      "price_band": "$150-200",
+      "rating_approx": 4.6,
+      "best_for_tags": ["eye_strain", "late_night_gamers", "blue_light", "wfh_gamer", "streamers", "vtubers"],
+      "notes": "Eye-strain anchor. Halo variant has wireless dial."
+    },
+    {
+      "category": "desk_ergonomics",
+      "name": "Everlasting Comfort Memory Foam Lumbar Support Pillow",
+      "asin": "B071FHRZ69",
+      "image_url": "https://m.media-amazon.com/images/I/81xVTbDhmuL._AC_SL1500_.jpg",
+      "price_band": "$30-45",
+      "rating_approx": 4.4,
+      "best_for_tags": ["back_pain", "wfh_back_pain", "sciatica_sufferers", "budget_under_200"],
+      "notes": "Sub-$50 lumbar add-on for any gaming chair."
+    },
+    {
+      "category": "desk_ergonomics",
+      "name": "ErgoFoam Adjustable Foot Rest Under Desk",
+      "asin": "B07VHRG2QQ",
+      "image_url": "https://m.media-amazon.com/images/I/71Z4eL+Q5IL._AC_SL1500_.jpg",
+      "price_band": "$30-50",
+      "rating_approx": 4.5,
+      "best_for_tags": ["short_users", "back_pain", "petite_women", "college_students"],
+      "notes": "Footrest anchor for short-user content."
+    },
+    {
+      "category": "desk_ergonomics",
+      "name": "Logitech MX Vertical Ergonomic Mouse",
+      "asin": "B07FNJB8TT",
+      "image_url": "https://m.media-amazon.com/images/I/61g4z+5HhKL._AC_SL1500_.jpg",
+      "price_band": "$80-110",
+      "rating_approx": 4.5,
+      "best_for_tags": ["wrist_pain", "arthritis_users", "wfh_gamer", "mmo_players", "ergo_setup"],
+      "notes": "Vertical mouse anchor — wrist pain crossover from mmo content."
+    }
+  ]
+}

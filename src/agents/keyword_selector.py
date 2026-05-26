@@ -372,11 +372,31 @@ class KeywordSelectorAgent(BaseAgent):
             # text/intent so we can apply the type-rate adjustment to its
             # priority BEFORE the LLM sees the list. Coarse but enough
             # to push the ordering in the right direction.
-            def _guess_type(kw: str, intent: str | None) -> str | None:
+            # Pattern matchers for affiliate-style "best X for/under Y" —
+            # these are buying-guide round-ups, not gaming comparisons. The
+            # COMPARISON_PROMPT (with the 4 hard rules) handles both shapes.
+            import re as _re
+            _AFFILIATE_PAT = _re.compile(
+                r"\bbest\s+\w+.*\b(for|under\s+\$?\d+|over\s+\$?\d+|in\s+\d{4})\b",
+                _re.IGNORECASE,
+            )
+
+            def _guess_type(kw: str, intent: str | None, notes: str | None = None) -> str | None:
+                # Explicit override from notes (set by ingest_affiliate_keywords.py):
+                #   "...|article_type=comparison|..."
+                if notes:
+                    m = _re.search(r"\barticle_type=([a-z_]+)", notes)
+                    if m:
+                        return m.group(1)
+
                 kwl = (kw or "").lower()
                 if any(s in kwl for s in ("banner", "patch", "release date", "schedule")):
                     return "news"
+                # Versus-style ("X vs Y") AND "best X for Z" / "best X under $N"
+                # both route to comparison so the COMPARISON_PROMPT picks them up.
                 if "vs " in kwl or " vs" in kwl or " or " in kwl:
+                    return "comparison"
+                if _AFFILIATE_PAT.search(kwl):
                     return "comparison"
                 if "tier list" in kwl or "best characters" in kwl or "best dps" in kwl:
                     return "tier_list"
@@ -408,7 +428,7 @@ class KeywordSelectorAgent(BaseAgent):
                     per_game_blacklist.get(game_slug, type_blacklist)
                     if game_slug else type_blacklist
                 )
-                guessed_type = _guess_type(kw, intent)
+                guessed_type = _guess_type(kw, intent, notes)
                 if guessed_type and guessed_type in effective_blacklist:
                     continue
                 # Skip topics already covered by a published article (dedup).

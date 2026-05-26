@@ -10,6 +10,8 @@ rather than the LLM's stale training set.
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 from typing import Any
 
 from src.agents._json_extract import extract_json
@@ -250,6 +252,100 @@ Aim for 5 products in the `products` array (3-7 acceptable). All 4 rules apply.
 """
 
 
+# Affiliate product seed dictionary — loaded once at import. Drives the
+# COMPARISON_PROMPT so the LLM PREFERS real, editor-vetted ASINs over
+# inventing new ones (broken affiliate links = lost trust + revenue).
+# File lives outside src/ so it can be edited without touching code.
+_PRODUCT_DICT_PATH = Path(__file__).resolve().parents[2] / "data" / "affiliate_products.json"
+try:
+    with _PRODUCT_DICT_PATH.open(encoding="utf-8") as _f:
+        _PRODUCT_DICT: dict[str, list[dict[str, Any]]] = {"products": []}
+        _loaded = json.load(_f)
+        if isinstance(_loaded, dict) and isinstance(_loaded.get("products"), list):
+            _PRODUCT_DICT = _loaded
+except Exception:
+    _PRODUCT_DICT = {"products": []}
+
+
+# Heuristic category inference from a comparison keyword text. Used when
+# the keyword's notes don't carry category=... (older affiliate keywords)
+# or as a sanity check. Maps tokens → category.
+_CATEGORY_TOKEN_MAP: dict[str, str] = {
+    "chair": "gaming_chairs", "stool": "gaming_chairs",
+    "keyboard": "keyboards_mice", "mouse": "keyboards_mice",
+    "mice": "keyboards_mice", "tkl": "keyboards_mice", "switch": "keyboards_mice",
+    "monitor": "monitors_displays", "display": "monitors_displays",
+    "ultrawide": "monitors_displays", "oled": "monitors_displays",
+    "headphone": "audio_headphones", "headset": "audio_headphones",
+    "earbud": "audio_headphones", "mic": "audio_headphones", "iem": "audio_headphones",
+    "desk": "desk_ergonomics", "lamp": "desk_ergonomics", "light": "desk_ergonomics",
+    "arm": "desk_ergonomics", "footrest": "desk_ergonomics",
+    "webcam": "desk_ergonomics", "ring light": "desk_ergonomics",
+}
+
+
+def _category_for_keyword(keyword: str, notes: str | None = None) -> str | None:
+    """Return the product category for a comparison keyword.
+
+    1. Prefer notes hint (set by ingest_affiliate_keywords.py).
+    2. Fall back to token match on the keyword text.
+    3. Returns None if no match — caller injects ALL products as a generic
+       fallback (LLM picks the best matches).
+    """
+    if notes:
+        m = re.search(r"\bcategory=([a-z_]+)", notes)
+        if m:
+            return m.group(1)
+    kwl = (keyword or "").lower()
+    for tok, cat in _CATEGORY_TOKEN_MAP.items():
+        if tok in kwl:
+            return cat
+    return None
+
+
+def _products_block_for(keyword: str, notes: str | None = None) -> str:
+    """Build the 'preferred products' block injected into COMPARISON_PROMPT.
+
+    Returns an empty string if the product dict is empty (graceful
+    degradation — the prompt still works without it, the LLM just picks
+    its own products from web search).
+    """
+    products = _PRODUCT_DICT.get("products") or []
+    if not products:
+        return ""
+    cat = _category_for_keyword(keyword, notes)
+    if cat:
+        relevant = [p for p in products if p.get("category") == cat]
+    else:
+        relevant = products
+
+    if not relevant:
+        return ""
+
+    # Slim the JSON: only the fields the LLM needs to pick + reproduce.
+    # Drop notes / confidence flags — those are editor-side metadata.
+    slim = [
+        {
+            "name": p.get("name"),
+            "asin": p.get("asin"),
+            "image_url": p.get("image_url"),
+            "price_band": p.get("price_band"),
+            "rating_approx": p.get("rating_approx"),
+            "best_for_tags": p.get("best_for_tags") or [],
+        }
+        for p in relevant
+    ]
+    return (
+        "\n\nPREFERRED PRODUCT DICTIONARY — editor-vetted Amazon ASINs.\n"
+        "Use these products when they fit the audience. You may include 1-2\n"
+        "additional products NOT in this list if they're a stronger fit for the\n"
+        "specific 'for [audience]' angle of this keyword — but justify the\n"
+        "addition in the verdict. Never invent ASINs; if a product you want to\n"
+        "include isn't here, set asin to null and the editor will fill it in.\n\n"
+        f"{json.dumps(slim, indent=2)}\n"
+    )
+
+
 class OutlineAgent(BaseAgent):
     name = "outline"
     task_type = "outline"
@@ -310,10 +406,16 @@ class OutlineAgent(BaseAgent):
         elif article_type == "comparison":
             # Affiliate / "best X for Y" round-up. Skips the game-specific
             # factuality framing (we're not making game claims here) and
-            # uses the dedicated prompt with the 4 hard rules.
-            prompt = COMPARISON_PROMPT.format(
-                keyword=keyword,
-                target_words=target_words,
+            # uses the dedicated prompt with the 4 hard rules. Also injects
+            # the editor-vetted PREFERRED PRODUCT DICTIONARY so the LLM
+            # picks from real ASINs instead of hallucinating them.
+            notes_hint = input_data.get("notes")  # passed through from selector
+            prompt = (
+                COMPARISON_PROMPT.format(
+                    keyword=keyword,
+                    target_words=target_words,
+                )
+                + _products_block_for(keyword, notes_hint)
             )
         else:
             sections = TYPE_SECTIONS.get(article_type, ["Overview", "Details", "FAQ"])
