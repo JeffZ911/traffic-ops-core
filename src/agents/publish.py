@@ -351,6 +351,20 @@ class PublishAgent(BaseAgent):
             if isinstance(qa_text, str) and qa_text.strip():
                 fm["quick_answer"] = qa_text.strip()
 
+            # Comparison / affiliate round-ups: surface the structured
+            # `products` array into frontmatter. ntecodex's ProductRoundup
+            # component renders these as cards (with comparison table)
+            # above the prose body. Mark affiliate=true so ArticleLayout
+            # also renders the FTC disclosure banner.
+            products = outline_blob.get("products")
+            if (
+                article_type == "comparison"
+                and isinstance(products, list)
+                and len(products) > 0
+            ):
+                fm["products"] = products
+                fm["affiliate"] = True
+
         if site_niche == "ecommerce_tools":
             platform_slug = (
                 (outline_blob.get("platform")

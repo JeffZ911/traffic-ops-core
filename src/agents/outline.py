@@ -148,6 +148,108 @@ where search yields no reliable answer, use "[information unavailable]" or null.
 """
 
 
+# Comparison / "best X for Y" affiliate round-up prompt.
+#
+# This is the OPPOSITE of generic AI review spam. Four hard rules enforced
+# below produce content that survives both AdSense scrutiny and reader
+# bullshit-detection:
+#
+#   1) SINGLE-AUDIENCE: title must contain "for [demo/use-case]". No
+#      "best in general" round-ups — they're indistinguishable from
+#      affiliate spam.
+#   2) WEAKNESS PARAGRAPH: every product gets `cons`. No cons = sales pitch.
+#   3) GROUNDED FACTS: every spec (price, rating, dimension) traces to a
+#      source URL. Reddit thread > random blog. Unverifiable spec = drop it.
+#   4) "WHY SKIPPED X" SECTION: name the brands NOT included and why.
+#      This is the strongest trust signal — proves curation, not scraping.
+#
+# Output `products` array becomes frontmatter `products:` on the published
+# article, where ntecodex's ProductRoundup component renders it as cards
+# above the prose body.
+COMPARISON_PROMPT = """You are a product reviewer covering gear used by long-session gacha/MMO/JRPG players.
+
+Your job: produce a comparison round-up for the keyword: "{keyword}"
+
+This article will publish on a site that takes Amazon Associates commissions.
+That MUST NOT change your recommendations. Editorial independence is the only
+reason readers come back. If a product is bad, say so. If a popular product is
+overrated, say so. Cite sources for every factual claim.
+
+CRITICAL: factual accuracy
+- Use Google Search to find current product specs, pricing bands, ratings,
+  and review aggregations from RTINGS, Wirecutter, Reddit (r/ergonomics,
+  r/MechanicalKeyboards, r/Monitors), and Amazon review aggregates.
+- Each `verdict` and `cons` field must trace to something a reader could
+  verify. Don't invent specs. If a spec isn't verifiable, omit it rather
+  than guess.
+- For Amazon ASIN values: if uncertain, set "asin": null and the editor
+  will fill it in. Never guess ASINs.
+
+FOUR HARD RULES — outputs are rejected if any rule is violated:
+
+  R1 SINGLE-AUDIENCE TITLE. The title MUST contain "for [demo or scenario]".
+     - Bad: "Best gaming chairs 2026"
+     - Good: "Best gaming chair for players over 6'2"" / "Best gaming
+             chair under $300 for long MMO sessions"
+
+  R2 WEAKNESS PARAGRAPH. Every product MUST have a non-empty `cons` array
+     with at least 2 specific weaknesses. "None really" is NOT a valid con.
+     Generic cons ("could be cheaper") are NOT valid — point to specific
+     features or use-case mismatches.
+
+  R3 GROUNDED FACTS. The `verdict` text must reference specific specs or
+     comparisons (price tier, build material, warranty length, etc.) — no
+     hand-wave like "great product" or "highly recommended". The reader
+     should be able to fact-check the verdict against the cited spec.
+
+  R4 "WHY WE SKIPPED" SECTION. Include a section h2 = "What we didn't
+     include and why" naming 2-3 popular brands/products you DELIBERATELY
+     left out, with a specific reason for each (e.g., "DXRacer racing-seat
+     geometry pushes shoulders forward — wrong for long sessions").
+
+Reply with a single JSON object (no surrounding prose, no fences). Schema:
+{{
+  "article_type": "comparison",
+  "title": "<must contain 'for [specific audience or scenario]'>",
+  "slug": "<kebab-case>",
+  "meta_description": "<140-160 chars>",
+  "h1": "<same as title>",
+  "quick_answer": "<1-2 sentences naming the top pick + 1-2 specific runner-ups for different sub-segments. Max 240 chars.>",
+  "target_audience": "<one sentence: who this article is FOR. e.g. 'Players 6'2\\" and taller doing 4+ hour sessions on a budget under $500.'>",
+  "products": [
+    {{
+      "name": "<exact Amazon-style product name>",
+      "asin": "<Amazon ASIN or null if uncertain>",
+      "image_url": "<full m.media-amazon.com URL or null>",
+      "price_usd": <number — approximate retail>,
+      "rating": <number 0-5>,
+      "review_count": <approximate integer>,
+      "best_for": "<short tag — what this product is the top pick for>",
+      "pros": ["<concrete pro 1>", "<concrete pro 2>", "<concrete pro 3>"],
+      "cons": ["<specific weakness 1>", "<specific weakness 2>"],
+      "verdict": "<2-3 sentence editorial verdict citing specific specs or comparisons>"
+    }}
+  ],
+  "sections": [
+    {{"h2": "How we picked these {{category}}", "key_points": ["...sourcing methodology...", "...selection criteria..."], "data_required": []}},
+    {{"h2": "What '{{audience tag}}' actually needs", "key_points": ["...3 specific requirements with rationale..."], "data_required": []}},
+    {{"h2": "Comparison summary", "key_points": ["...explain the rankings without listing products again..."], "data_required": []}},
+    {{"h2": "When to skip the upgrade", "key_points": ["...honest 'don't buy' guidance — strong trust signal..."], "data_required": []}},
+    {{"h2": "What we didn't include and why", "key_points": ["<brand A and why>", "<brand B and why>"], "data_required": []}}
+  ],
+  "internal_links": [
+    {{"anchor_text": "<text>", "target_keyword": "<adjacent buying-guide keyword>"}}
+  ],
+  "image_specs": [
+    {{"position": "hero", "description": "<lifestyle shot showing product in long-session use, NOT a stock product photo>", "aspect_ratio": "16:9"}}
+  ],
+  "estimated_word_count": {target_words}
+}}
+
+Aim for 5 products in the `products` array (3-7 acceptable). All 4 rules apply.
+"""
+
+
 class OutlineAgent(BaseAgent):
     name = "outline"
     task_type = "outline"
@@ -202,6 +304,14 @@ class OutlineAgent(BaseAgent):
             prompt = CHARACTER_DB_PROMPT.format(
                 game_name=game_name,
                 factual_rules=rules,
+                keyword=keyword,
+                target_words=target_words,
+            )
+        elif article_type == "comparison":
+            # Affiliate / "best X for Y" round-up. Skips the game-specific
+            # factuality framing (we're not making game claims here) and
+            # uses the dedicated prompt with the 4 hard rules.
+            prompt = COMPARISON_PROMPT.format(
                 keyword=keyword,
                 target_words=target_words,
             )
