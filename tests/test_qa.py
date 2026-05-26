@@ -205,12 +205,13 @@ def test_tier_note_when_score_mid():
     assert out["passed"] is True
 
 
-def test_tier_strong_when_score_low_mid():
-    """4.5 ≤ qa < 6.0 → tier='strong', still publishes with prominent banner."""
+def test_tier_strong_does_not_publish():
+    """4.5 ≤ qa < 6.0 → tier='strong'. Publish gate raised 2026-05-25: strong
+    no longer ships (would only be auto-noindex'd). Only clean+note pass."""
     agent = _qa_with_response(_build_qa_json(score=5.0, fa=1, fab=[]))
     out = agent._execute(_base_input())
     assert out["tier"] == "strong"
-    assert out["passed"] is True
+    assert out["passed"] is False
 
 
 def test_tier_reject_when_score_very_low():
@@ -232,13 +233,14 @@ def test_one_fab_with_high_fa_gets_small_penalty():
 
 
 def test_three_fabs_get_heavy_penalty_and_likely_reject():
-    """3 fab → -2.0 score penalty; 7.5 → 5.5 → tier='strong' (still ships)."""
+    """3 fab → -2.0 score penalty; 7.5 → 5.5 → tier='strong'. Strong no longer
+    publishes (publish gate = clean+note only)."""
     agent = _qa_with_response(_build_qa_json(score=7.5, fa=2, fab=["A", "B", "C"]))
     out = agent._execute(_base_input())
     assert out["feedback"]["_fab_penalty"].startswith("-2.0")
     assert abs(out["score"] - 5.5) < 0.01
     assert out["tier"] == "strong"
-    assert out["passed"] is True
+    assert out["passed"] is False
 
 
 def test_zero_fa_with_fab_heavy_penalty_drops_to_reject():

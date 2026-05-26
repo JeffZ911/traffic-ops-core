@@ -320,9 +320,12 @@ class QAAgent(BaseAgent):
 
         feedback["editorial_tier"] = tier
 
-        # `passed` now means "ship it" — anything tier=clean/note/strong.
-        # tier='reject' is the only non-publish outcome.
-        passed = tier != "reject"
+        # Publish gate (raised 2026-05-25): only clean + note ship. The
+        # strong band (4.5-6.0) is now ALSO withheld — it was being published
+        # then auto-noindex'd (qa_score < 6.0 prune), i.e. pure wasted spend.
+        # Aligning the publish gate with the index gate at 6.0 means we never
+        # generate-and-bury: strong/reject don't publish at all. Quality-first.
+        passed = tier in ("clean", "note")
 
         return {
             "score": score,
