@@ -67,6 +67,7 @@ Reply with a single JSON object (no surrounding prose, no fences). Schema:
   "slug": "<kebab-case slug, ASCII only, max 60 chars>",
   "meta_description": "<140-160 chars>",
   "h1": "<the article H1>",
+  "quick_answer": "<1-2 sentences that directly answer the search query — appears as a callout card above the article body so readers get the answer without scrolling. Concrete and specific, not a hedged preamble. Max 240 chars.>",
   "sections": [
     {{
       "h2": "<exact section name from required list>",
@@ -102,6 +103,7 @@ Reply with a single JSON object (no surrounding prose, no fences). Schema:
   "slug": "<character-name-slug>",
   "meta_description": "<140-160 chars>",
   "h1": "<the article H1>",
+  "quick_answer": "<1-2 sentences that directly answer 'how do I build/play this character?' — appears as a callout card above the body. Be concrete: name the BiS weapon and primary team archetype. Max 240 chars.>",
   "character_id": "<lowercase character name>",
   "rarity": <int 4 or 5; if unknown use null>,
   "element": "<element name; if unknown 'Unknown'>",

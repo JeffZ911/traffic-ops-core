@@ -341,6 +341,16 @@ class PublishAgent(BaseAgent):
             "sources": [s.get("uri") for s in sources if s.get("uri")],
         }
 
+        # Surface outline.quick_answer (1-2 sentence answer callout) to
+        # frontmatter so the Astro layout can render it as a top-of-article
+        # card. Optional — if the outline didn't generate it (older articles
+        # or models that skipped the field), nothing is written and the
+        # site falls back to showing only the prose body.
+        if isinstance(outline_blob, dict):
+            qa_text = outline_blob.get("quick_answer")
+            if isinstance(qa_text, str) and qa_text.strip():
+                fm["quick_answer"] = qa_text.strip()
+
         if site_niche == "ecommerce_tools":
             platform_slug = (
                 (outline_blob.get("platform")
