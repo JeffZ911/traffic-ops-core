@@ -31,21 +31,30 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 # Per-site cap policy.
 SITE_POLICY: dict[str, dict] = {
     "ntecodex.com": {
-        "daily_article_cap": 6,
+        "daily_article_cap": 10,
         "article_type_floors": {
-            # Guarantees 3 affiliate "best X for Y" roundup articles per
-            # day even if the gaming-content selector would otherwise
-            # always win the random tie. /guides/ stays evergreen-busy.
-            "comparison": 3,
+            # Guarantees revenue + SEO breadth every day. Every directory
+            # on /sitemap.xml gets at least 1 daily update so Google's
+            # freshness crawler always finds movement. Floor sum = 6 of
+            # the 10 daily_article_cap slots; the other 4 go to whatever
+            # the selector wants (build / faq / boss / etc).
+            "comparison":  3,   # /guides/ — affiliate roundups, revenue
+            "character_db": 1,  # /characters/ — was 0/day, now floor 1
+            "weapon_db":    1,  # /weapons/ — was 0/day
+            "news":         1,  # /news/ — banner/patch coverage
         },
     },
     "pixelmatch.art": {
-        "daily_article_cap": 6,
+        "daily_article_cap": 8,
         "article_type_floors": {
             # vs_comparison is pixelmatch's revenue-relevant content type
-            # (tool-vs-tool reviews that channel readers into SaaS signups
-            # and Amazon-Associate hardware links). Floor mirrors ntecodex.
+            # (tool-vs-tool reviews channel readers into SaaS signups +
+            # Amazon-Associate hardware links).
             "vs_comparison": 3,
+            # use_case + policy_guide rotate occasional coverage to keep
+            # all four directories fresh in the sitemap.
+            "use_case":      1,
+            "policy_guide":  1,
         },
     },
 }

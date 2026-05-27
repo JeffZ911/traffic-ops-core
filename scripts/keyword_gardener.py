@@ -721,32 +721,40 @@ def auto_balance_types(
     config: dict,
     existing: set[str],
     budget_usd: float,
+    forced_types: list[str] | None = None,
+    forced_count: int | None = None,
 ) -> tuple[int, float]:
     """Seed keywords for any article_type with 0 published in the last 14d.
 
+    If `forced_types` is provided, skips the starvation check and seeds
+    those types directly (used by the type-floor pre-seed in main()).
     Returns (rows_inserted, cumulative_cost_usd).
     """
     from datetime import date, timedelta
-    cur.execute(
-        """
-        select article_type, count(*)
-          from articles
-         where site_id = %s
-           and status = 'published'
-           and published_at >= %s
-         group by article_type
-        """,
-        (str(site_id), date.today() - timedelta(days=14)),
-    )
-    have_recent = {r[0] for r in cur.fetchall() if r[0]}
     ecom = _is_ecom(config)
     hints = ECOM_TYPE_HINTS if ecom else TYPE_HINTS
-    # Universe of types is niche-specific (ecommerce sites have no build/boss/…).
-    universe = (
-        (config.get("allowed_article_types") or list(ECOM_TYPE_HINTS.keys()))
-        if ecom else list(TYPE_HINTS.keys())
-    )
-    starved = [t for t in universe if t not in have_recent]
+
+    if forced_types:
+        starved = list(forced_types)
+    else:
+        cur.execute(
+            """
+            select article_type, count(*)
+              from articles
+             where site_id = %s
+               and status = 'published'
+               and published_at >= %s
+             group by article_type
+            """,
+            (str(site_id), date.today() - timedelta(days=14)),
+        )
+        have_recent = {r[0] for r in cur.fetchall() if r[0]}
+        # Universe of types is niche-specific (ecommerce: no build/boss/…).
+        universe = (
+            (config.get("allowed_article_types") or list(ECOM_TYPE_HINTS.keys()))
+            if ecom else list(TYPE_HINTS.keys())
+        )
+        starved = [t for t in universe if t not in have_recent]
 
     # Respect sites.config.content_plan.type_blacklist: never seed keywords
     # for a category the operator has marked unwritable. Without this, the
@@ -937,6 +945,49 @@ def main() -> int:
     print(f"   planned now:    {planned_count}")
     print(f"   threshold:      {args.min_planned}")
     print(f"   total in pool:  {len(existing)}")
+
+    # Type-floor pre-seed: for every article_type with a daily floor
+    # (sites.config.content_plan.article_type_floors), make sure the
+    # keyword pool has enough `planned` keywords of that type. Without
+    # this, run_batch_smoke's force_article_type would have 0 candidates
+    # and the selector would crash. Cheap — single LLM call per starved
+    # type, only when planned-count for that type is < 2× the floor.
+    floors = ((config.get("content_plan") or {}).get("article_type_floors") or {})
+    if floors and not ecom:
+        with get_db_connection() as conn, conn.cursor() as cur:
+            for atype, floor_n in floors.items():
+                # Skip comparison — it's seeded by run_affiliate_seed above
+                # (which also runs unconditionally each cron).
+                if atype in ("comparison", "vs_comparison"):
+                    continue
+                # Count planned keywords likely to be picked as this type.
+                # Cheap heuristic: notes contains "article_type=X" OR
+                # source='auto_type_balance' (created by previous balance
+                # passes). Underestimates by ~30% but good enough as a
+                # floor trigger.
+                cur.execute(
+                    """
+                    select count(*) from keywords
+                     where site_id = %s and status = 'planned'
+                       and (notes ilike %s or source = 'auto_type_balance')
+                    """,
+                    (str(site_id), f"%article_type={atype}%"),
+                )
+                planned_for_type = int(cur.fetchone()[0])
+                target = max(int(floor_n) * 3, 6)  # keep ≥3× the daily floor
+                if planned_for_type >= target:
+                    print(f"   ⚖️  floor-pool {atype}: {planned_for_type}/{target} — OK")
+                    continue
+                deficit = target - planned_for_type
+                print(f"   ⚖️  floor-pool {atype}: {planned_for_type}/{target} — seeding {deficit}")
+                try:
+                    bal_inserted, bal_cost = auto_balance_types(
+                        cur, site_id, config, existing, args.budget_usd,
+                        forced_types=[atype], forced_count=deficit,
+                    )
+                    print(f"      ↳ +{bal_inserted} for {atype} (${bal_cost:.4f})")
+                except Exception as e:
+                    print(f"      ↳ ⚠️  floor-pool seed for {atype} failed: {e}")
 
     # Affiliate seed runs EVERY cron, independent of pool top-up state.
     # The pool may have plenty of gaming keywords but zero affiliate
