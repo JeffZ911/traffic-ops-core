@@ -205,6 +205,15 @@ def run_trending(site_id: UUID, config: dict, existing: set[str], args) -> int:
     """Seed time-sensitive 'trend' keywords (source='trend'). KeywordSelector
     gives these a freshness bonus (by created_at) that decays over ~2 weeks,
     so they get written fast then expire. Returns rows inserted."""
+    # Niche guard: like auto_balance_types, trend scan's gaming fallback
+    # branch generates game-themed keywords (referencing game release dates)
+    # which pollutes the security_cameras pool. Skip until a security-
+    # specific TREND_PROMPT exists.
+    niche = _niche(config)
+    if niche == "security_cameras":
+        print(f"   📈 trend scan: skipped (niche={niche} — no trend prompt yet)")
+        return 0
+
     ecom = _is_ecom(config)
     type_blacklist = list((config.get("content_plan") or {}).get("type_blacklist") or [])
     if ecom:
@@ -754,6 +763,19 @@ def auto_balance_types(
     Returns (rows_inserted, cumulative_cost_usd).
     """
     from datetime import date, timedelta
+
+    # Niche guard: auto-balance generates keywords via TYPE_BALANCE_PROMPT
+    # which references game_name / game_abbr / release_date — completely
+    # off-topic for security_cameras. Earlier runs leaked NTE / Neverness
+    # keywords into the quvii pool via this path. Until a real
+    # SECURITY_TYPE_BALANCE_PROMPT lands, skip entirely for this niche;
+    # bootstrap_quvii.py seeds the pool by hand and KeywordSelector has
+    # enough planned keywords to keep the pipeline fed.
+    niche = _niche(config)
+    if niche == "security_cameras":
+        print(f"   ⚖️  auto-balance: skipped (niche={niche} — no balance prompt yet)")
+        return 0, 0.0
+
     ecom = _is_ecom(config)
     hints = ECOM_TYPE_HINTS if ecom else TYPE_HINTS
 
