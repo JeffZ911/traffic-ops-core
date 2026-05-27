@@ -67,6 +67,45 @@ class LLMError(Exception):
 
 
 # ---------------------------------------------------------------------------
+# Model auto-fallback table — survives a Google model retirement
+# ---------------------------------------------------------------------------
+#
+# When `generate(model=X)` raises a 404 / NOT_FOUND / model-deprecated error,
+# the provider retries with the next entry in MODEL_FALLBACKS[X] before giving
+# up. This is the "理论上应该自动切换" lever — no DB edit, no redeploy needed
+# to recover when Google quietly retires a -preview SKU.
+#
+# Each chain is ordered most→least preferred. Keep all fallbacks inside the
+# same tier (text → text, image → image) so behavior doesn't degrade
+# unexpectedly. Add a new entry here every time we discover a new retired
+# model + a working replacement.
+MODEL_FALLBACKS: dict[str, list[str]] = {
+    # Text — flash tier
+    "gemini-3.1-flash-lite-preview": ["gemini-3.1-flash-preview", "gemini-3-flash-preview"],
+    "gemini-3.1-flash-preview":      ["gemini-3-flash-preview", "gemini-2.5-flash"],
+    "gemini-3-flash-preview":        ["gemini-2.5-flash"],
+    # Text — pro tier
+    "gemini-3.1-pro-preview":        ["gemini-2.5-pro"],
+    # Image
+    "gemini-3.1-flash-image-preview": ["gemini-2.5-flash-image"],
+    "gemini-3-pro-image-preview":     ["gemini-2.5-flash-image"],
+}
+
+
+def _is_model_unavailable(err: Exception) -> bool:
+    """Return True if the error indicates the model itself is gone/unknown."""
+    s = str(err).lower()
+    return any(
+        k in s for k in (
+            "not_found", "not found",
+            "404",
+            "model is not available", "no longer available",
+            "deprecated", "is not supported",
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
 # Base provider
 # ---------------------------------------------------------------------------
 
@@ -140,15 +179,55 @@ class GeminiLLMProvider(BaseLLMProvider):
 
         config = types.GenerateContentConfig(**config_kwargs)
 
+        # Auto-fallback chain: if the configured model is retired (404 /
+        # NOT_FOUND / deprecated), retry with the next entry in
+        # MODEL_FALLBACKS[model] before raising. Prevents one Google
+        # model retirement from cascading into "whole pipeline dead until
+        # operator fixes DB" — see 2026-05-26 gemini-3.1-flash-lite-preview
+        # incident for the case this guards against.
+        attempted: list[str] = []
+        last_err: Exception | None = None
+        try_models = [model] + MODEL_FALLBACKS.get(model, [])
+
         start = time.perf_counter()
-        try:
-            response = self._client.models.generate_content(
-                model=model,
-                contents=prompt,
-                config=config,
-            )
-        except Exception as e:
-            raise LLMError(_scrub(f"{type(e).__name__}: {e}")) from None
+        response = None
+        for m in try_models:
+            attempted.append(m)
+            try:
+                response = self._client.models.generate_content(
+                    model=m,
+                    contents=prompt,
+                    config=config,
+                )
+                if m != model:
+                    # Log via stderr (test envs capture stdout but pipeline
+                    # logs are stderr-friendly). Importing logging at module
+                    # top adds startup cost; print is fine for this rare path.
+                    import sys
+                    print(
+                        f"⚠️  LLM auto-fallback: '{model}' unavailable, used '{m}' instead. "
+                        f"Update sites.config to point at '{m}' directly to silence this.",
+                        file=sys.stderr,
+                    )
+                model = m  # so cost estimate + response.model report the actual
+                break
+            except Exception as e:
+                last_err = e
+                if not _is_model_unavailable(e):
+                    # Hard failure (auth, rate limit, network) — don't burn
+                    # through the fallback list on something fallback can't fix.
+                    raise LLMError(_scrub(f"{type(e).__name__}: {e}")) from None
+                # Else: model gone, try next in chain.
+                continue
+
+        if response is None:
+            assert last_err is not None
+            raise LLMError(
+                _scrub(
+                    f"All models in fallback chain unavailable. Tried: {attempted}. "
+                    f"Last error: {type(last_err).__name__}: {last_err}"
+                )
+            ) from None
         duration_ms = int((time.perf_counter() - start) * 1000)
 
         usage = getattr(response, "usage_metadata", None)

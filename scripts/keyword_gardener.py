@@ -52,7 +52,20 @@ TYPE_HINTS = {
     "weapon_db":    'weapon / artifact / disk profile',
     "news":         'patch notes / banner schedule / version updates',
     "faq":          'FAQ / mechanics-explained content',
-    "comparison":   '"X vs Y" head-to-heads',
+    # `comparison` covers BOTH "X vs Y" game-internal comparisons AND the
+    # affiliate "best X for Y" gaming-gear buying guides. The OutlineAgent
+    # routes both to COMPARISON_PROMPT (which enforces the 4 hard rules for
+    # affiliate content); game-vs-game comparisons fall back gracefully
+    # since they're a vanishing minority of comparison output.
+    "comparison":   (
+        '"X vs Y" head-to-heads OR "best X for Y" affiliate-friendly '
+        'gaming-gear buying guides (gaming chairs, mechanical keyboards, '
+        'gaming mice, monitors, headphones, ergonomic desk gear). For '
+        'gear: single-audience focus ("for tall players" / "under $300" / '
+        '"for MMO macros") — NEVER generic "best chair 2026". Tag notes '
+        'with category=<one of: gaming_chairs|keyboards_mice|monitors_displays|'
+        'audio_headphones|desk_ergonomics> when generating a gear keyword.'
+    ),
 }
 
 # ECOMMERCE niche (e.g. pixelmatch.art) — totally different taxonomy. Used
