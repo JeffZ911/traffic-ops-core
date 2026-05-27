@@ -404,9 +404,15 @@ def run_affiliate_seed(
              or "gemini-3.1-flash-preview")
     print(f"\n🛒 Affiliate seed: generating {n_target} gear keywords "
           f"(category-balanced, single-audience)")
+    # Drop enable_search — affiliate gear keywords don't need real-time data,
+    # the 4 hard rules are about audience-shape not currency. With search off
+    # we can use strict json_mode (response_mime_type=application/json) which
+    # forces Gemini to emit valid array-of-objects JSON. With search on the
+    # llm.py path silently disables json_mode (grounding-incompatible) and
+    # the model returned malformed bare key:value pairs.
     try:
         resp = provider.generate(prompt=prompt, model=model, max_tokens=2500,
-                                 temperature=0.4, json_mode=True, enable_search=True)
+                                 temperature=0.4, json_mode=True, enable_search=False)
     except Exception as e:
         print(f"   ⚠️  affiliate seed LLM call failed: {type(e).__name__}: {e}")
         return 0
