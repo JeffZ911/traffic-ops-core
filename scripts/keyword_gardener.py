@@ -315,6 +315,165 @@ element shaped:
 """
 
 
+# Affiliate gear "best X for Y" generator — separate prompt from the
+# game-keyword path because the gaming PROMPT_TEMPLATE forces every
+# keyword to include "nte/neverness", which would corrupt affiliate
+# keywords ("best gaming chair for nte players" makes no sense).
+#
+# Generates keywords TAGGED with the right category= note so the
+# downstream OutlineAgent products-dict injection picks the right
+# affiliate_products.json slice (chairs vs keyboards vs etc).
+AFFILIATE_PROMPT_TEMPLATE = """You are a buying-guide SEO researcher for a gacha/MMO/JRPG audience.
+We want long-tail "best X for Y" affiliate keywords for gaming-adjacent
+peripherals our readers (long-session gamers) would actually buy via Amazon.
+
+We already have these keywords in the pool — DO NOT duplicate (case-insensitive):
+{existing_sample}
+
+Use Google Search for current 2026 buying-guide trends. Generate exactly
+{n_target} NEW keywords across these 5 product categories (try for ~equal
+distribution):
+
+  - gaming_chairs       (ergonomic chairs, racing-seat chairs, footrest combos)
+  - keyboards_mice      (mechanical, low-profile, mmo-side-button mice, wireless)
+  - monitors_displays   (gaming monitors, ultrawide, OLED, 1440p, 4K)
+  - audio_headphones    (closed-back, gaming headsets, IEMs, mics, vtuber gear)
+  - desk_ergonomics     (standing desks, monitor arms, lumbar supports, lights)
+
+HARD RULES — outputs failing any rule will be rejected:
+  R1 SINGLE-AUDIENCE: title must contain "for [demo or scenario]" OR
+     "under $N" / "over $N" / "in 2026". NEVER generic "best chair 2026".
+     Bad:  "best gaming chair 2026"
+     Good: "best gaming chair for tall mmo players under $500"
+  R2 NEVER mention specific game titles in the keyword (NTE, HSR, etc).
+     Cross-game audience phrases OK ("gacha grinders", "mmo macro players",
+     "long-session jrpg gamers", "raid leaders").
+  R3 Avoid head terms — aim for est 100-2000 monthly searches per keyword
+     (3+ qualifier words is usually right).
+
+Reply ONLY with a single JSON array (no markdown fence). Each element:
+{{
+  "keyword": "<lowercase, 4-9 words>",
+  "intent": "buy",
+  "article_type": "comparison",
+  "priority_score": <integer 50-80; higher = more demand>,
+  "category": "<one of: gaming_chairs|keyboards_mice|monitors_displays|audio_headphones|desk_ergonomics>",
+  "audience": "<short tag, e.g. tall_users, budget_under_300, mmo_macro, wfh_back_pain>",
+  "notes": "<short rationale>"
+}}
+"""
+
+
+def run_affiliate_seed(
+    site_id: UUID, config: dict, existing: set[str], n_target: int = 6,
+    budget_usd: float = 0.40,
+) -> int:
+    """Seed affiliate 'best X for Y' keywords each cron — bypasses the gaming
+    keyword path entirely (which forces "nte/neverness" in every keyword).
+    Inserts with notes encoded as:
+
+        article_type=comparison|category=<cat>|audience=<tag>|game=multi
+
+    so the OutlineAgent's products-dict injection picks the right category
+    slice from data/affiliate_products.json. Returns rows inserted.
+
+    Skipped for ecommerce-niche sites (their affiliate path is different).
+    Skipped when comparison/affiliate is in type_blacklist.
+    """
+    if _is_ecom(config):
+        return 0
+    type_blacklist = list((config.get("content_plan") or {}).get("type_blacklist") or [])
+    if "comparison" in type_blacklist:
+        print("   🛒 affiliate seed: comparison blacklisted — skip")
+        return 0
+
+    existing_sample = sorted(existing)
+    if len(existing_sample) > 40:
+        existing_sample = existing_sample[:20] + existing_sample[-20:]
+    existing_lines = "\n".join(f"  - {kw}" for kw in existing_sample) or "  (empty pool)"
+
+    prompt = AFFILIATE_PROMPT_TEMPLATE.format(
+        existing_sample=existing_lines,
+        n_target=n_target,
+    )
+
+    provider = get_llm_provider("gemini")
+    text_cfg = config.get("text_provider") or {}
+    model = (text_cfg.get("keyword_research_model")
+             or text_cfg.get("outline_model")
+             or "gemini-3.1-flash-preview")
+    print(f"\n🛒 Affiliate seed: generating {n_target} gear keywords "
+          f"(category-balanced, single-audience)")
+    try:
+        resp = provider.generate(prompt=prompt, model=model, max_tokens=2500,
+                                 temperature=0.4, json_mode=True, enable_search=True)
+    except Exception as e:
+        print(f"   ⚠️  affiliate seed LLM call failed: {type(e).__name__}: {e}")
+        return 0
+    if resp.cost_usd > budget_usd:
+        print(f"   ⚠️  cost ${resp.cost_usd:.4f} over budget ${budget_usd:.2f}; skipping inserts")
+        return 0
+
+    text = resp.text.strip()
+    try:
+        data = json.loads(text)
+    except Exception:
+        try:
+            data = extract_json("{\"items\": " + text + "}").get("items", [])
+        except Exception:
+            print("   ⚠️  affiliate seed parse failed"); return 0
+    if isinstance(data, dict):
+        for k in ("keywords", "items", "results"):
+            if isinstance(data.get(k), list):
+                data = data[k]; break
+    if not isinstance(data, list):
+        return 0
+
+    valid_categories = {
+        "gaming_chairs", "keyboards_mice", "monitors_displays",
+        "audio_headphones", "desk_ergonomics",
+    }
+    fresh = [d for d in data if isinstance(d, dict)
+             and (d.get("keyword") or "").strip()
+             and (d.get("keyword") or "").strip().lower() not in existing
+             and (d.get("category") in valid_categories)]
+
+    if not fresh:
+        print("   nothing to insert (duplicates or invalid)")
+        return 0
+
+    inserted = 0
+    with get_db_connection() as conn, conn.cursor() as cur:
+        for item in fresh:
+            kw = (item.get("keyword") or "").strip()
+            category = item.get("category", "unknown")
+            audience = item.get("audience", "general")
+            base_notes = (item.get("notes") or "")[:200]
+            notes = (
+                f"article_type=comparison|category={category}|"
+                f"audience={audience}|game=multi|{base_notes}"
+            )[:500]
+            try:
+                cur.execute(
+                    """
+                    insert into keywords
+                      (site_id, keyword, intent, priority_score, source, notes, status)
+                    values (%s, %s, 'buy', %s, 'affiliate_seed', %s, 'planned')
+                    on conflict (site_id, keyword) do nothing
+                    """,
+                    (str(site_id), kw,
+                     int(item.get("priority_score") or 65),
+                     notes),
+                )
+                if cur.rowcount:
+                    inserted += 1
+                    existing.add(kw.lower())
+            except Exception as e:
+                print(f"   ⚠️  affiliate insert skip {kw!r}: {e}")
+    print(f"   🛒 affiliate seed: +{inserted} keyword(s) (cost ${resp.cost_usd:.4f})")
+    return inserted
+
+
 def _log_verify_rejection(
     site_id: UUID, keyword: str, reason: str, fabricated_entities: list[str]
 ) -> None:
@@ -689,8 +848,23 @@ def main() -> int:
     print(f"   planned now:    {planned_count}")
     print(f"   threshold:      {args.min_planned}")
     print(f"   total in pool:  {len(existing)}")
+
+    # Affiliate seed runs EVERY cron, independent of pool top-up state.
+    # The pool may have plenty of gaming keywords but zero affiliate
+    # ones — and the gaming PROMPT_TEMPLATE can't generate affiliate
+    # ("must include nte/neverness" rule). So we always inject 6 fresh
+    # "best X for Y" gear keywords per cron, totally separate path.
+    # ~6 keywords/cron × 6 crons/day = ~36 affiliate keywords/day,
+    # natural balance against the gaming inflow.
+    if not ecom:
+        try:
+            run_affiliate_seed(site_id, config, existing,
+                               n_target=6, budget_usd=args.budget_usd)
+        except Exception as e:
+            print(f"   ⚠️  affiliate seed failed: {type(e).__name__}: {e}")
+
     if planned_count >= args.min_planned and not args.force:
-        print(f"   ✓ above threshold — no action")
+        print(f"   ✓ above threshold — no top-up action")
         return 0
 
     print(f"   → topping up by {args.target}")
