@@ -398,18 +398,18 @@ def run_affiliate_seed(
     )
 
     provider = get_llm_provider("gemini")
-    text_cfg = config.get("text_provider") or {}
-    model = (text_cfg.get("keyword_research_model")
-             or text_cfg.get("outline_model")
-             or "gemini-3.1-flash-preview")
+    # Use gemini-2.5-flash specifically (NOT the configured keyword_research_model)
+    # because:
+    #   1) gemini-3-flash-preview is a thinking model whose chain-of-thought
+    #      leaks into .text as "***\n" preambles, making JSON parsing
+    #      unreliable (this is the bug we chased through 4 runs).
+    #   2) gemini-2.5-flash is non-thinking + strict json_mode-compliant +
+    #      half the cost. The affiliate seed task is small (6 short keywords),
+    #      doesn't need 3.x-tier reasoning.
+    # Auto-fallback in llm.py catches the (unlikely) case 2.5-flash retires.
+    model = "gemini-2.5-flash"
     print(f"\n🛒 Affiliate seed: generating {n_target} gear keywords "
-          f"(category-balanced, single-audience)")
-    # Drop enable_search — affiliate gear keywords don't need real-time data,
-    # the 4 hard rules are about audience-shape not currency. With search off
-    # we can use strict json_mode (response_mime_type=application/json) which
-    # forces Gemini to emit valid array-of-objects JSON. With search on the
-    # llm.py path silently disables json_mode (grounding-incompatible) and
-    # the model returned malformed bare key:value pairs.
+          f"(category-balanced, single-audience, model={model})")
     try:
         resp = provider.generate(prompt=prompt, model=model, max_tokens=2500,
                                  temperature=0.4, json_mode=True, enable_search=False)
