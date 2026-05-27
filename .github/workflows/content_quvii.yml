@@ -38,7 +38,12 @@ env:
 jobs:
   pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    # Bumped from 35 → 60 on 2026-05-27. Gemini Imagen has been
+    # disconnecting/retrying frequently today, pushing the 21-image
+    # generation step over 35min repeatedly. Image gen is still
+    # serial inside src/agents/image.py; parallelising is a separate
+    # change deferred for a calmer day.
+    timeout-minutes: 60
 
     steps:
       - name: Checkout traffic-ops-core
