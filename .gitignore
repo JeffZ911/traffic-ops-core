@@ -29,3 +29,4 @@ build/
 # Backup files (never commit)
 *.bak
 env*.bak
+out-brand-images/
