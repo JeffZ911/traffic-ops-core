@@ -9,9 +9,10 @@ name: Content Pipeline (pixelmatch.art)
 #      + Cloudflare Pages project `pixelmatch-blog`.
 #   4. Per-site GA4 / GSC secrets use the PIXELMATCH_ prefix so
 #      collectors/base.site_env_prefix() resolves to the right env vars.
-#   5. SLOW START schedule — 2 crons/day (03:00 + 15:00 UTC) until
-#      pixelmatch has ≥30 articles + GSC traction; then expand to 24/day
-#      by cloning content_daily.yml's schedule block.
+#   5. ALIGNED schedule (2026-05-27): 6 crons/day matching ntecodex
+#      03/07/11/15/19/23 UTC. Daily-cap (sites.config.daily_article_cap=6)
+#      throttles actual article production — extra crons just provide
+#      retry slots + steady IndexNow/sitemap pings throughout the day.
 #
 # When a third site is added (e.g. brand3.com): copy this file, swap
 # the prefix once, never re-author the body.
@@ -19,7 +20,11 @@ name: Content Pipeline (pixelmatch.art)
 on:
   schedule:
     - cron: '0 3 * * *'
+    - cron: '0 7 * * *'
+    - cron: '0 11 * * *'
     - cron: '0 15 * * *'
+    - cron: '0 19 * * *'
+    - cron: '0 23 * * *'
   workflow_dispatch:
 
 concurrency:

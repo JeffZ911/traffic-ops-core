@@ -59,6 +59,16 @@ def main() -> int:
         int(_cap_cfg) if _cap_cfg is not None else 5
     )
 
+    # Per-article-type FLOOR (revenue-driver guarantee). Example:
+    #   { "comparison": 3 }
+    # means: as long as comparison articles published today < 3, force the
+    # KeywordSelector to prefer comparison keywords. Implemented via a flag
+    # passed into run_one_article → KeywordSelector that filters candidates.
+    _floors_cfg = ((_cfg or {}).get("content_plan") or {}).get("article_type_floors") or {}
+    type_floors: dict[str, int] = {
+        k: int(v) for k, v in _floors_cfg.items() if isinstance(v, (int, str)) and str(v).isdigit()
+    }
+
     def _produced_today() -> int:
         """Articles created today (UTC) for this site — any status, since a
         failed attempt still consumed a slot + spend."""
@@ -69,6 +79,28 @@ def main() -> int:
                 (str(site_id),),
             )
             return int(cur.fetchone()[0])
+
+    def _published_today_by_type(article_type: str) -> int:
+        """Count articles of a given type with status='published' today.
+        Used to decide whether the type-floor still binds — we count only
+        published, not just attempted, because qa_failed attempts don't
+        deliver revenue."""
+        with get_db_connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "select count(*) from articles where site_id=%s "
+                "and article_type=%s and status='published' "
+                "and created_at >= date_trunc('day', now() at time zone 'utc')",
+                (str(site_id), article_type),
+            )
+            return int(cur.fetchone()[0])
+
+    def _forced_type_for_next() -> str | None:
+        """If a type-floor isn't met yet, return that type so the selector
+        forces a matching keyword. Returns None when all floors met."""
+        for atype, floor in type_floors.items():
+            if _published_today_by_type(atype) < floor:
+                return atype
+        return None
 
     print("=" * 78)
     print(f"=== Batch smoke: {args.count} articles ===")
@@ -97,9 +129,19 @@ def main() -> int:
         print(f"\n{'#' * 78}\n# Article {i}/{args.count}  "
               f"(month spent ${bg.spent_usd:.2f}/${bg.budget_usd:.2f} = "
               f"{bg.percent*100:.0f}%)\n{'#' * 78}")
+        # Type-floor enforcement: if any article_type's daily floor is
+        # not met yet, force this iteration to that type. Lets us
+        # guarantee 3 affiliate roundups/day on ntecodex (article_type
+        # =comparison) and 3 vs_comparison/day on pixelmatch.
+        forced_type = _forced_type_for_next() if type_floors else None
+        if forced_type:
+            print(f"  🎯 floor: forcing article_type={forced_type!r} this iteration")
+
         try:
             summary = run_one_article(
-                site_id, max_retry_rounds_override=args.max_retries,
+                site_id,
+                max_retry_rounds_override=args.max_retries,
+                force_article_type=forced_type,
             )
         except Exception as e:
             print(f"❌ Article {i} crashed: {type(e).__name__}: {e}")

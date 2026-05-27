@@ -268,9 +268,16 @@ def run_one_article(
     # ------------------------------------------------------ Step 1: select
     log("\n=== Step 1: KeywordSelectorAgent ===")
     selector = KeywordSelectorAgent(llm=llm, site_config=site_config)
+    sel_input: dict[str, Any] = {"site_id": str(site_id)}
+    if force_article_type:
+        # Force-type — selector narrows allowed_list to ONLY this type and
+        # pre-filters candidates to those whose guessed_type matches. The
+        # post-selector override below stays as a belt-and-suspenders
+        # safeguard in case the selector still picks a mismatched keyword.
+        sel_input["force_article_type"] = force_article_type
     sel = selector.run(
         site_id=site_id, article_id=None,
-        input_data={"site_id": str(site_id)},
+        input_data=sel_input,
     )
     keyword_id = UUID(sel["keyword_id"])
     keyword = sel["keyword_text"]

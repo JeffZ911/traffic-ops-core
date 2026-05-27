@@ -510,6 +510,26 @@ class KeywordSelectorAgent(BaseAgent):
         else:
             allowed_list = [t for t in ALL_TYPES if t not in type_blacklist]
 
+        # Force-type narrowing (article_type_floors revenue guarantee).
+        # When run_batch_smoke passes force_article_type, restrict the
+        # selector to ONLY that type so the comparison-floor logic actually
+        # produces comparison articles (instead of the LLM picking any
+        # type and the orchestrator forcibly relabeling it after — which
+        # would mean wrong prompt for the keyword).
+        force_type = input_data.get("force_article_type")
+        if force_type and force_type in allowed_list:
+            allowed_list = [force_type]
+            # Also pre-filter candidates to favor those whose guessed
+            # type matches — drops the entire candidate set to ~10% but
+            # keeps the LLM focused on relevant keywords.
+            forced_candidates = [
+                c for c in candidates
+                if c.get("guessed_type") == force_type
+                or (c.get("notes") or "").find(f"article_type={force_type}") >= 0
+            ]
+            if forced_candidates:
+                candidates = forced_candidates
+
         prompt = PROMPT.format(
             candidates=json.dumps(candidates, indent=2, ensure_ascii=False),
             track_record="\n".join(tr_lines),

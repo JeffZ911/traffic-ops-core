@@ -323,6 +323,49 @@ element shaped:
 # Generates keywords TAGGED with the right category= note so the
 # downstream OutlineAgent products-dict injection picks the right
 # affiliate_products.json slice (chairs vs keyboards vs etc).
+ECOM_AFFILIATE_PROMPT_TEMPLATE = """You are a buying-guide SEO researcher for ecommerce sellers (Amazon FBA / Shopify / Etsy / TikTok Shop operators).
+
+We want long-tail "best X for Y" keywords for physical seller equipment
+our readers (active sellers running product-photo workflows) would buy
+via Amazon. The blog hosting these is pixelmatch.art — an AI product-
+photography SaaS — so equipment categories that intersect that audience.
+
+We already have these keywords in the pool — DO NOT duplicate:
+{existing_sample}
+
+Generate exactly {n_target} NEW keywords across these 5 categories
+(try for ~equal distribution):
+
+  - camera_gear       (DSLR/mirrorless for product photos, smartphone gimbals, lens for macro)
+  - lighting          (ring lights, softboxes, LED panels, light tents)
+  - photo_studio      (lightboxes, photo backdrops, turntables, photo boxes)
+  - workspace_ergo    (label printer for shipping, monitor arms, ergonomic chair for editing sessions)
+  - storage_shipping  (poly mailers, dimensional weight scales, label dispenser, shipping software)
+
+HARD RULES:
+  R1 SINGLE-AUDIENCE: title MUST contain "for [seller demo/scenario]" OR
+     "under $N" / "for [platform]" specificity. NEVER generic "best 2026".
+     Bad:  "best ring light 2026"
+     Good: "best ring light for amazon product photos under $200"
+  R2 NO mention of game titles or gacha vocabulary in keyword (this is
+     a seller blog, not a gaming blog). Audience tags should be
+     seller-flavored: small_etsy_seller, fba_volume_seller, side_hustle,
+     amazon_arbitrage, tiktok_creator_seller.
+  R3 100-2000 monthly searches target band (3+ qualifier words).
+
+Reply ONLY with a single JSON array (no markdown fence). Each element:
+{{
+  "keyword": "<lowercase, 4-9 words>",
+  "intent": "buy",
+  "article_type": "vs_comparison",
+  "priority_score": <integer 50-80>,
+  "category": "<one of: camera_gear|lighting|photo_studio|workspace_ergo|storage_shipping>",
+  "audience": "<short tag>",
+  "notes": "<short rationale>"
+}}
+"""
+
+
 AFFILIATE_PROMPT_TEMPLATE = """You are a buying-guide SEO researcher for a gacha/MMO/JRPG audience.
 We want long-tail "best X for Y" affiliate keywords for gaming-adjacent
 peripherals our readers (long-session gamers) would actually buy via Amazon.
@@ -377,14 +420,16 @@ def run_affiliate_seed(
     so the OutlineAgent's products-dict injection picks the right category
     slice from data/affiliate_products.json. Returns rows inserted.
 
-    Skipped for ecommerce-niche sites (their affiliate path is different).
-    Skipped when comparison/affiliate is in type_blacklist.
+    Both niches supported — gaming uses AFFILIATE_PROMPT_TEMPLATE (gaming-
+    audience gear like chairs/keyboards), ecommerce uses
+    ECOM_AFFILIATE_PROMPT_TEMPLATE (seller equipment like cameras/lights).
+    Skipped when the corresponding comparison article_type is blacklisted.
     """
-    if _is_ecom(config):
-        return 0
+    ecom = _is_ecom(config)
     type_blacklist = list((config.get("content_plan") or {}).get("type_blacklist") or [])
-    if "comparison" in type_blacklist:
-        print("   🛒 affiliate seed: comparison blacklisted — skip")
+    target_type = "vs_comparison" if ecom else "comparison"
+    if target_type in type_blacklist:
+        print(f"   🛒 affiliate seed: {target_type} blacklisted — skip")
         return 0
 
     existing_sample = sorted(existing)
@@ -392,7 +437,8 @@ def run_affiliate_seed(
         existing_sample = existing_sample[:20] + existing_sample[-20:]
     existing_lines = "\n".join(f"  - {kw}" for kw in existing_sample) or "  (empty pool)"
 
-    prompt = AFFILIATE_PROMPT_TEMPLATE.format(
+    template = ECOM_AFFILIATE_PROMPT_TEMPLATE if ecom else AFFILIATE_PROMPT_TEMPLATE
+    prompt = template.format(
         existing_sample=existing_lines,
         n_target=n_target,
     )
@@ -465,10 +511,15 @@ def run_affiliate_seed(
     if not isinstance(data, list):
         return 0
 
-    valid_categories = {
+    valid_gaming = {
         "gaming_chairs", "keyboards_mice", "monitors_displays",
         "audio_headphones", "desk_ergonomics",
     }
+    valid_ecom = {
+        "camera_gear", "lighting", "photo_studio",
+        "workspace_ergo", "storage_shipping",
+    }
+    valid_categories = valid_ecom if ecom else valid_gaming
     fresh = [d for d in data if isinstance(d, dict)
              and (d.get("keyword") or "").strip()
              and (d.get("keyword") or "").strip().lower() not in existing
@@ -485,8 +536,10 @@ def run_affiliate_seed(
             category = item.get("category", "unknown")
             audience = item.get("audience", "general")
             base_notes = (item.get("notes") or "")[:200]
+            # Tag with the right article_type so KeywordSelector routes
+            # the keyword to the correct outline prompt downstream.
             notes = (
-                f"article_type=comparison|category={category}|"
+                f"article_type={target_type}|category={category}|"
                 f"audience={audience}|game=multi|{base_notes}"
             )[:500]
             try:
