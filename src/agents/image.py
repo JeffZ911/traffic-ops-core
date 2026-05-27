@@ -85,9 +85,30 @@ ECOM_STYLE = (
     + _QUALITY + " " + _COPYRIGHT_GUARD
 )
 
+# security_cameras (quvii): STRICT PHOTOREALISM. The reference brands are
+# Apple, DJI, Reolink, Eufy, Ring product pages + RTINGS / Wirecutter
+# hands-on reviews. Hard ban on illustration, anime, 3D-render, cartoon —
+# anything that looks "AI-art-ish" cheapens a security camera buying-guide
+# instantly. Output must read as journalistic product photography.
+SECURITY_CAMERA_STYLE = (
+    "STRICT PHOTOREALISTIC product photography in the style of Apple, DJI, "
+    "Reolink, and Eufy marketing pages. Real DSLR / mirrorless camera output, "
+    "natural studio or in-context lighting, accurate materials (matte plastic, "
+    "brushed aluminum, glass camera lenses with realistic IR ring), shallow "
+    "depth-of-field where appropriate, clean neutral backgrounds or genuine "
+    "in-home/outdoor installation contexts. NO illustration, NO anime, NO "
+    "cartoon, NO 3D-render aesthetic, NO stylized vector art, NO glowing "
+    "magical effects. Looks like an editorial photo from The Verge, "
+    "Tom's Guide, or RTINGS. No logos, no on-screen text. " + _QUALITY
+)
+
 
 def _is_ecom(niche: str | None) -> bool:
     return (niche or "gaming") == "ecommerce_tools"
+
+
+def _is_security(niche: str | None) -> bool:
+    return (niche or "") == "security_cameras"
 
 
 def resolve_art_style(game: str | None, site_config: dict | None = None) -> str:
@@ -102,6 +123,18 @@ def resolve_art_style(game: str | None, site_config: dict | None = None) -> str:
 def hero_prompt(niche: str | None, title: str, *, art_style: str | None = None) -> str:
     """Niche-aware cover image. Gaming = original anime key-art that actually
     depicts the topic's setting/action (not abstract emptiness)."""
+    if _is_security(niche):
+        subject = (
+            f"Editorial hero image for an article titled: \"{title}\". "
+            "Depict ONE real-looking home security camera (or installer's "
+            "hands holding one) in an authentic install context: mounted "
+            "above a front door, on a porch ceiling, in a corner of a living "
+            "room, or in a garage. Show actual cabling or mount hardware "
+            "when relevant. The camera body should look like a real consumer "
+            "IP camera — matte plastic shell, glass lens with subtle IR ring, "
+            "small status LED. Generic unbranded body (no Ring/Nest/Eufy logos)."
+        )
+        return f"{subject} {SECURITY_CAMERA_STYLE}"
     if _is_ecom(niche):
         subject = (
             f"Editorial cover image representing the concept of: \"{title}\". "
@@ -130,6 +163,19 @@ def inline_prompt(
 ) -> str:
     """Section image bound to the specific H2 topic, composed differently from
     the cover, favouring vivid concrete scenes over vague atmosphere."""
+    if _is_security(niche):
+        subject = (
+            f"Photo for the '{section_topic}' section of a security-camera "
+            f"article about {article_theme}. Show one concrete physical "
+            "scene relevant to this section: a person screwing a mount into "
+            "drywall, a hand holding a microSD card next to a camera, a "
+            "phone showing a generic camera-app UI on a kitchen counter, "
+            "a Wi-Fi router on a shelf with a camera in soft focus behind, "
+            "or a side-by-side of two different real-looking IP cameras. "
+            "Compose CLEARLY differently from a cover hero shot — closer, "
+            "more detail-focused, more 'how-to' than 'marketing'."
+        )
+        return f"{subject} {SECURITY_CAMERA_STYLE}"
     if _is_ecom(niche):
         subject = (
             f"Section illustration for the '{section_topic}' part of an article "
