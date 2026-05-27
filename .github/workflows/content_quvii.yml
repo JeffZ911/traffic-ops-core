@@ -279,7 +279,18 @@ jobs:
           echo "── public/img dirs ──"
           find public/img -maxdepth 2 -type d 2>/dev/null | head -10 || true
 
-          git add src/content public/img public/_redirects 2>/dev/null || true
+          # Per-path add: git add is all-or-nothing when given multiple
+          # pathspecs — if any one doesn't exist on disk (very common:
+          # public/_redirects only exists when content_daily seeds it,
+          # public/img is empty when image gen fails or is skipped), the
+          # ENTIRE add fails with exit 128 and stages nothing. We were
+          # silently swallowing that via `|| true`, producing empty
+          # "skipping commit" no-ops while the runner had real .md / .webp
+          # files ready to commit. Add each path independently so a
+          # missing one doesn't take the others down.
+          git add src/content 2>/dev/null || true
+          git add public/img 2>/dev/null || true
+          git add public/_redirects 2>/dev/null || true
 
           echo "── git status AFTER add ──"
           git status --short || true
