@@ -43,6 +43,19 @@ PATH_BY_TYPE: dict[str, str] = {
     "vs_comparison":  "compare/{slug}.md",
     "use_case":       "stories/{slug}.md",
     "policy_guide":   "policy/{slug}.md",
+    # ── security_cameras niche (quvii — Phase 0 2026-05-27) ────────
+    # Quvii uses 4 top-level collections (blog/learn/reviews/support).
+    # blog/* gets sub-categorized via article body's category, not URL.
+    # Names prefixed `camera_` to avoid colliding with gaming `comparison`
+    # / `news` which already map to different folders.
+    "camera_buying_guide":  "blog/{slug}.md",
+    "camera_comparison":    "blog/{slug}.md",
+    "camera_install":       "blog/{slug}.md",
+    "camera_troubleshoot":  "blog/{slug}.md",
+    "camera_news":          "blog/{slug}.md",
+    "camera_learn":         "learn/{slug}.md",
+    "camera_review":        "reviews/{slug}.md",
+    "camera_support":       "support/{slug}.md",
 }
 
 # Public URL pattern (for articles.published_url). Aggregated types map to
@@ -71,6 +84,15 @@ URL_BY_TYPE: dict[str, str] = {
     "vs_comparison":  "/blog/compare/{slug}",
     "use_case":       "/blog/stories/{slug}",
     "policy_guide":   "/blog/policy/{slug}",
+    # ── security_cameras (quvii) ─────────────────────────────────
+    "camera_buying_guide":  "/blog/{slug}",
+    "camera_comparison":    "/blog/{slug}",
+    "camera_install":       "/blog/{slug}",
+    "camera_troubleshoot":  "/blog/{slug}",
+    "camera_news":          "/blog/{slug}",
+    "camera_learn":         "/learn/{slug}",
+    "camera_review":        "/reviews/{slug}",
+    "camera_support":       "/support/{slug}",
 }
 
 

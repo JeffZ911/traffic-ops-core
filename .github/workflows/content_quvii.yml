@@ -1,0 +1,457 @@
+name: Content Pipeline (quvii.com)
+# Site-2 pipeline. STRUCTURALLY IDENTICAL to content_daily.yml (the
+# ntecodex template) — every step and every continue-on-error policy
+# mirrors the proven template. The only intentional differences:
+#
+#   1. SITE_DOMAIN env routes scripts to quvii.com's sites row.
+#   2. SITE_REPO_PATH points at the quvii-site checkout.
+#   3. PAT secret + Pages project name swap: QUVII_SITE_REPO_PAT
+#      + Cloudflare Pages project `quvii-site`.
+#   4. Per-site GA4 / GSC secrets use the PIXELMATCH_ prefix so
+#      collectors/base.site_env_prefix() resolves to the right env vars.
+#   5. ALIGNED schedule (2026-05-27): 6 crons/day matching ntecodex
+#      03/07/11/15/19/23 UTC. Daily-cap (sites.config.daily_article_cap=6)
+#      throttles actual article production — extra crons just provide
+#      retry slots + steady IndexNow/sitemap pings throughout the day.
+#
+# When a third site is added (e.g. brand3.com): copy this file, swap
+# the prefix once, never re-author the body.
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+    - cron: '0 7 * * *'
+    - cron: '0 11 * * *'
+    - cron: '0 15 * * *'
+    - cron: '0 19 * * *'
+    - cron: '0 23 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: content-quvii
+  cancel-in-progress: false
+
+env:
+  # Single source of truth — every script reads this for tenant routing.
+  SITE_DOMAIN: quvii.com
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout traffic-ops-core
+        uses: actions/checkout@v4
+
+      - name: Checkout quvii-site (cross-repo)
+        uses: actions/checkout@v4
+        with:
+          repository: JeffZ911/quvii-site
+          # PAT with repo:contents:write on JeffZ911/quvii-site.
+          token: ${{ secrets.QUVII_SITE_REPO_PAT }}
+          path: quvii-site
+          fetch-depth: 0
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Python deps
+        run: pip install -e .
+
+      - name: Configure git for site repo
+        working-directory: quvii-site
+        run: |
+          git config user.name "${{ secrets.GIT_USER_NAME }}"
+          git config user.email "${{ secrets.GIT_USER_EMAIL }}"
+
+      # ---------------------------------------------------------------- 0.
+      # Budget guard — reads sites.config.monthly_budget_usd and the
+      # running month-to-date sum of agent_runs.cost_usd. Emits action ∈
+      # {normal, warn, limit_extras, pause_all}; pause_all short-circuits
+      # the rest of the workflow.
+      - name: Budget guard
+        id: budget
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set +e
+          python -m src.utils.budget_guard --site $SITE_DOMAIN --json > /tmp/budget.json
+          rc=$?
+          cat /tmp/budget.json
+          ACTION=$(python -c "import json; print(json.load(open('/tmp/budget.json'))['action'])")
+          PERCENT=$(python -c "import json; print(json.load(open('/tmp/budget.json'))['percent'])")
+          SPENT=$(python -c "import json; print(json.load(open('/tmp/budget.json'))['spent_usd'])")
+          BUDGET=$(python -c "import json; print(json.load(open('/tmp/budget.json'))['budget_usd'])")
+          echo "action=$ACTION"   >> "$GITHUB_OUTPUT"
+          echo "percent=$PERCENT" >> "$GITHUB_OUTPUT"
+          echo "spent=$SPENT"     >> "$GITHUB_OUTPUT"
+          echo "budget=$BUDGET"   >> "$GITHUB_OUTPUT"
+          if [ "$rc" = "78" ]; then
+            echo "🛑 Budget guard says pause_all — short-circuiting workflow."
+          fi
+
+      - name: Alert on pause_all
+        if: steps.budget.outputs.action == 'pause_all'
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+        run: |
+          python -m src.utils.send_alert \
+            --type=budget_pause \
+            --workflow=content_quvii \
+            --severity=warning \
+            --subject="[pixelmatch] daily cron paused — monthly budget at ${{ steps.budget.outputs.percent }}" \
+            --message="month-to-date spend ${{ steps.budget.outputs.spent }} of ${{ steps.budget.outputs.budget }}. Daily cron skipped. Resumes automatically on month rollover."
+
+      - name: Alert on budget warn / limit_extras
+        if: steps.budget.outputs.action == 'warn' || steps.budget.outputs.action == 'limit_extras'
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+        run: |
+          python -m src.utils.send_alert \
+            --type=budget_warning \
+            --workflow=content_quvii \
+            --severity=info \
+            --subject="[pixelmatch] budget ${{ steps.budget.outputs.action }} — ${{ steps.budget.outputs.spent }} of ${{ steps.budget.outputs.budget }}" \
+            --message="action=${{ steps.budget.outputs.action }}. Core daily article will still be produced; maintenance tasks may be skipped if limit_extras."
+
+      # ---------------------------------------------------------------- 1.
+      # GA4 + GSC daily collectors. run_collectors iterates EVERY active
+      # site in the DB; both ntecodex and pixelmatch will be covered when
+      # either workflow runs. Per-site credentials resolve via
+      # src.collectors.base.site_env_prefix() — reads sites.config.site_slug
+      # (= "pixelmatch") and looks for env QUVII_GA4_PROPERTY_ID.
+      - name: Collect yesterday's GA4 + GSC metrics
+        if: steps.budget.outputs.action != 'pause_all'
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+          # Both sites' GA4 property IDs are exposed so run_collectors
+          # can fetch metrics for whichever tenant it's processing.
+          NTECODEX_GA4_PROPERTY_ID: ${{ secrets.NTECODEX_GA4_PROPERTY_ID }}
+          QUVII_GA4_PROPERTY_ID: ${{ secrets.QUVII_GA4_PROPERTY_ID }}
+        run: python -m scripts.run_collectors
+
+      # ---------------------------------------------------------------- 2.
+      # Keyword pool top-up + auto-balance starved article types.
+      - name: Garden the keyword pool
+        if: steps.budget.outputs.action != 'pause_all'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.QUVII_GEMINI_API_KEY }}
+        run: |
+          if [ "${{ steps.budget.outputs.action }}" = "limit_extras" ]; then
+            python -m scripts.keyword_gardener --min-planned 20 --target 12
+          else
+            python -m scripts.keyword_gardener --min-planned 20 --target 12 \
+              --auto-balance-types
+          fi
+
+      # ------------------------------------------------------------- 2b.
+      # Trend-jacking ("蹭话题"): once/day at 03:00 UTC, seed time-sensitive
+      # ecommerce 'trend' keywords (new AI tools, platform policy changes,
+      # selling events). KeywordSelector decays their freshness bonus.
+      - name: Trend scan (keyword gardener --trending)
+        if: steps.budget.outputs.action != 'pause_all'
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.QUVII_GEMINI_API_KEY }}
+        run: |
+          if [ "$(date -u +%H)" = "03" ]; then
+            python -m scripts.keyword_gardener --trending --target 5
+          else
+            echo "skip — trend scan runs once/day at 03:00 UTC (now $(date -u +%H):00)"
+          fi
+
+      # ---------------------------------------------------------------- 3.
+      # Article generation — slow-start: 3 articles per cron × 2 crons/day
+      # = ~6 articles/day. Bump to batch=4 + 24 cron/day when ramping.
+      - name: Generate articles (batch=3)
+        if: steps.budget.outputs.action != 'pause_all'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.QUVII_GEMINI_API_KEY }}
+        run: python -m scripts.run_batch_smoke --count 3 --max-retries 1
+
+      # ---------------------------------------------------------------- 4.
+      - name: Publish article markdown to quvii-site
+        if: steps.budget.outputs.action != 'pause_all'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.QUVII_GEMINI_API_KEY }}
+          SITE_REPO_PATH: ${{ github.workspace }}/quvii-site
+        run: python -m scripts.publish_articles
+
+      # ---------------------------------------------------------------- 5.
+      - name: Install Pillow (image processing)
+        if: steps.budget.outputs.action != 'pause_all'
+        run: pip install --quiet Pillow
+
+      - name: Generate hero + 6 inline images for the NEW article
+        if: steps.budget.outputs.action != 'pause_all'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.QUVII_GEMINI_API_KEY }}
+          SITE_REPO_PATH: ${{ github.workspace }}/quvii-site
+        run: |
+          python -m scripts.run_image_for_articles --new-only --inline 6 --budget-usd 0.50
+
+      # ---------------------------------------------------------------- 5b.
+      # Backfill the OLDEST article that has fewer than 4 inline images.
+      - name: Backfill 1 under-imaged article
+        if: steps.budget.outputs.action == 'normal' || steps.budget.outputs.action == 'warn'
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.QUVII_GEMINI_API_KEY }}
+          SITE_REPO_PATH: ${{ github.workspace }}/quvii-site
+        run: |
+          python -m scripts.backfill_one_under_imaged --budget-usd 0.40
+
+      # ---------------------------------------------------------------- 5c.
+      # GSC feedback loop: rewrite ONE page-2 article per day.
+      - name: Rewrite 1 page-2 article (GSC feedback loop)
+        if: steps.budget.outputs.action == 'normal' || steps.budget.outputs.action == 'warn'
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.QUVII_GEMINI_API_KEY }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+          SITE_REPO_PATH: ${{ github.workspace }}/quvii-site
+        run: |
+          python -m scripts.rewrite_one_article --budget-usd 1.00
+
+      # ---------------------------------------------------------------- 6.
+      # P0 FIX: commit + push the generated content back to the site repo
+      # BEFORE wrangler deploy. See content_daily.yml for the full
+      # rationale (workspace ephemerality / sitemap drift).
+      - name: Commit + push generated content back to site repo
+        if: steps.budget.outputs.action != 'pause_all'
+        working-directory: quvii-site
+        run: |
+          set -e
+          git add src/content public/img public/_redirects 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "ℹ️  no new content this cron — skipping commit"
+            exit 0
+          fi
+          STAMP="$(date -u +%Y-%m-%d-%H%MZ)"
+          git commit -m "[auto-cron pixelmatch] content batch $STAMP (run ${{ github.run_id }})"
+          attempt=0
+          until git push origin HEAD:main; do
+            attempt=$((attempt + 1))
+            if [ "$attempt" -ge 3 ]; then
+              echo "❌ push failed after 3 attempts"
+              exit 1
+            fi
+            echo "⚠️  push race lost (attempt $attempt) — rebasing"
+            git pull --rebase origin main
+          done
+          echo "✓ pushed content batch to quvii-site"
+
+      # ---------------------------------------------------------------- 7.
+      - name: Setup Node 22
+        if: env.skip_deploy != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Inject per-site PUBLIC_* env vars into quvii-site/.env.local
+      # so Astro picks them up at build time. Mirrors the ntecodex
+      # workflow step. See scripts/inject_site_env.py for the lookup
+      # order — sites.config first, env fallback.
+      - name: Inject per-site tracking IDs into Astro env
+        if: env.skip_deploy != 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          # Provide env fallbacks too; DB still wins when present.
+          QUVII_GA4_MEASUREMENT_ID: ${{ secrets.QUVII_GA4_MEASUREMENT_ID }}
+          QUVII_ADSENSE_PUBLISHER_ID: ${{ secrets.QUVII_ADSENSE_PUBLISHER_ID }}
+          SITE_REPO_PATH: ${{ github.workspace }}/quvii-site
+        run: python -m scripts.inject_site_env
+
+      - name: Build Astro site
+        if: env.skip_deploy != 'true'
+        working-directory: quvii-site
+        run: |
+          npm install
+          npm run build
+
+      - name: Deploy to Cloudflare Pages
+        if: env.skip_deploy != 'true'
+        working-directory: quvii-site
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx --yes wrangler@latest pages deploy dist \
+            --project-name quvii-site --branch main --commit-dirty=true
+
+      # ---------------------------------------------------------------- 7b.
+      # Re-submit sitemap to GSC (see content_daily.yml for rationale).
+      - name: Re-submit sitemap to GSC
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+        run: python -m scripts.resubmit_sitemap --site quvii.com
+
+      # ---------------------------------------------------------------- 7c.
+      # Gray-area accelerator (see content_daily.yml). Skips without SA.
+      - name: Request indexing (Indexing API, best-effort)
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.QUVII_GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: python -m scripts.request_indexing --site quvii.com --limit 50
+
+      # ---------------------------------------------------------------- 7d.
+      # IndexNow push (see content_daily.yml). Bing/Yandex/DuckDuckGo.
+      - name: IndexNow submit (Bing/Yandex)
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: python -m scripts.indexnow_submit --site quvii.com
+
+      # ---------------------------------------------------------------- 7e.
+      - name: Auto-flag ops tasks
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+        run: python -m scripts.ops_autoflag --site quvii.com
+
+      # ---------------------------------------------------------------- 7f.
+      - name: Daily GSC request-indexing worklist
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+        run: |
+          if [ "$(date -u +%H)" = "03" ]; then
+            python -m scripts.daily_indexing_worklist --site quvii.com --max-inspect 40
+          else
+            echo "skip — worklist runs once/day at 03:00 UTC"
+          fi
+
+      # ---------------------------------------------------------------- 8.
+      # GSC traction signals: stagnation + positive-signal alerts.
+      - name: GSC traction signals (stagnation + positive)
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+        run: python -m src.maintenance.gsc_signal_check
+
+      # ---------------------------------------------------------------- 9.
+      - name: Velocity check (3-day pass-rate band)
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+        run: python -m src.maintenance.velocity_check
+
+      # ---------------------------------------------------------------- 10.
+      - name: Finalize stuck articles (auto-resolve mid-pipeline stalls)
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: python -m scripts.finalize_stuck_articles
+
+      # ---------------------------------------------------------------- 11.
+      - name: Mobile responsiveness check
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+        run: python -m scripts.check_mobile_responsive
+
+      # ---------------------------------------------------------------- 12.
+      - name: Notify on failure
+        if: failure()
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+        run: |
+          python -m src.utils.send_alert \
+            --type=pipeline_failure \
+            --workflow=content_quvii \
+            --severity=critical \
+            --subject="Content Pipeline (quvii.com) failed" \
+            --message="Run ${{ github.run_id }} on ${{ github.repository }} failed.
+          Check logs at ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

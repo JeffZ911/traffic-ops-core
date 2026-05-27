@@ -21,6 +21,12 @@ from src.agents._prompts_ecommerce import (
     OUTLINE_GENERIC_PROMPT as ECOM_OUTLINE_GENERIC,
     OUTLINE_USE_CASE_PROMPT as ECOM_OUTLINE_USE_CASE,
 )
+from src.agents._prompts_security_cameras import (
+    SECURITY_CAMERAS_TYPE_SECTIONS,
+    FACTUAL_RULES as SC_FACTUAL_RULES,
+    GENERIC_PROMPT as SC_GENERIC_PROMPT,
+    COMPARISON_PROMPT as SC_COMPARISON_PROMPT,
+)
 from src.agents.base import BaseAgent
 
 
@@ -364,6 +370,8 @@ class OutlineAgent(BaseAgent):
         niche = self.site_config.get("niche") or "gaming"
         if niche == "ecommerce_tools":
             return self._execute_ecommerce(input_data)
+        if niche == "security_cameras":
+            return self._execute_security_cameras(input_data)
 
         # Multi-game (Phase 2.3+): prefer per-article game metadata
         # from input_data['game'], falling back to legacy
@@ -525,4 +533,59 @@ class OutlineAgent(BaseAgent):
         # site_config.
         outline.setdefault("niche", "ecommerce_tools")
         outline.setdefault("platform", platform_slug)
+        return outline
+
+    # ────────────────────────────────────────────────────────────────
+    # Security cameras niche branch — used when site_config.niche ==
+    # "security_cameras". Designed for quvii.com (Phase 0 2026-05-27).
+    # ────────────────────────────────────────────────────────────────
+    def _execute_security_cameras(self, input_data: dict[str, Any]) -> dict[str, Any]:
+        keyword = input_data["keyword"]
+        article_type = input_data["article_type"]
+        target_words = int(input_data.get("target_word_count", 1800))
+
+        brand = self.site_config.get("brand") or {}
+        brand_name = brand.get("name") or "Quvii"
+
+        # The factual rules are static for now — security camera shoppers
+        # are a coherent audience (US consumers, English-speaking). If we
+        # later add e.g. SMB business installs we can subdivide.
+        rules = SC_FACTUAL_RULES
+
+        if article_type == "camera_comparison" or article_type == "camera_buying_guide":
+            # Both routes use the comparison-style 4-rules prompt (these
+            # are the affiliate-funnel article types where buyer-decision
+            # quality matters most + ASIN/product[] fields are required).
+            prompt = SC_COMPARISON_PROMPT.format(
+                article_type=article_type,
+                keyword=keyword,
+                target_words=target_words,
+            )
+        else:
+            sections = SECURITY_CAMERAS_TYPE_SECTIONS.get(
+                article_type, ["Overview", "Details", "FAQ"]
+            )
+            prompt = SC_GENERIC_PROMPT.format(
+                brand_name=brand_name,
+                factual_rules=rules,
+                keyword=keyword,
+                article_type=article_type,
+                sections=", ".join(sections),
+                target_words=target_words,
+            )
+
+        resp = self._call_llm(
+            prompt=prompt,
+            max_tokens=8000,
+            temperature=0.4,
+            json_mode=True,
+            enable_search=True,
+        )
+        outline = extract_json(resp.text)
+        for required in ("title", "slug", "h1", "sections"):
+            if required not in outline:
+                raise ValueError(f"Outline missing field: {required}")
+        if not isinstance(outline["sections"], list) or not outline["sections"]:
+            raise ValueError("Outline.sections must be a non-empty list")
+        outline.setdefault("niche", "security_cameras")
         return outline

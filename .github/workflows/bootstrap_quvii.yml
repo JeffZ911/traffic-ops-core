@@ -1,0 +1,33 @@
+name: Bootstrap quvii.com (one-shot)
+
+# One-click setup: inserts quvii.com into the sites table + seeds
+# 50 keywords into the keyword pool. Run ONCE before the first
+# content_quvii cron fires.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run? "true" = report only'
+        required: true
+        default: 'false'
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - run: pip install -e .
+      - env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            python -m scripts.bootstrap_quvii --dry-run
+          else
+            python -m scripts.bootstrap_quvii
+          fi
