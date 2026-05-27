@@ -32,11 +32,15 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 
 # Add new mappings here as Google retires more model IDs.
-# Upgrade target: stay within the 3.1 series (newer, smarter) rather
-# than dropping to 3.0. If gemini-3.1-flash-preview itself ever 404s,
-# auto-fallback in src/utils/llm.py will catch it.
+#
+# 2026-05-26 second pass: gemini-3.1-flash-preview is ALSO 404. The
+# llm.py auto-fallback masks it but burns ~1s + a wasted API call on
+# every LLM invocation. Map directly to gemini-3-flash-preview (the
+# next tier down — currently the most stable flash model). When 3.0
+# flash retires too, this script picks up the new target.
 RETIRED_MODELS: dict[str, str] = {
-    "gemini-3.1-flash-lite-preview": "gemini-3.1-flash-preview",
+    "gemini-3.1-flash-lite-preview": "gemini-3-flash-preview",
+    "gemini-3.1-flash-preview":      "gemini-3-flash-preview",
 }
 
 

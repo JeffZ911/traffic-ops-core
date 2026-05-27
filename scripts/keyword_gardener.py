@@ -415,13 +415,45 @@ def run_affiliate_seed(
         return 0
 
     text = resp.text.strip()
+
+    # Strip markdown fences if present. enable_search=True forces json_mode
+    # off (Gemini's grounding tool is incompatible with response_mime_type),
+    # so the LLM sometimes wraps the JSON in ```json ... ```  fences despite
+    # the "no fence" instruction in the prompt.
+    if text.startswith("```"):
+        first_nl = text.find("\n")
+        if first_nl > 0:
+            text = text[first_nl + 1:]
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3].rstrip()
+
+    # Some grounded models prefix with a sentence, "Here are the keywords:".
+    # Find the first '[' or '{' and slice from there.
+    for ch in "[{":
+        i = text.find(ch)
+        if i > 0:
+            text = text[i:]
+            break
+
+    data: Any = None
     try:
         data = json.loads(text)
     except Exception:
         try:
             data = extract_json("{\"items\": " + text + "}").get("items", [])
         except Exception:
-            print("   ⚠️  affiliate seed parse failed"); return 0
+            # Last-ditch: regex-extract bracketed objects and JSON-parse each.
+            import re as _re
+            objs = _re.findall(r"\{[^{}]*\}", text)
+            data = []
+            for o in objs:
+                try:
+                    data.append(json.loads(o))
+                except Exception:
+                    pass
+            if not data:
+                print(f"   ⚠️  affiliate seed parse failed; raw={text[:300]!r}")
+                return 0
     if isinstance(data, dict):
         for k in ("keywords", "items", "results"):
             if isinstance(data.get(k), list):
