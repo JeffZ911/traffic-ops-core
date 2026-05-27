@@ -219,6 +219,16 @@ jobs:
 
       - name: Generate hero + 6 inline images for the NEW article
         if: steps.budget.outputs.action != 'pause_all'
+        # Gemini Imagen has been flaky lately — ReadError / Connection
+        # reset by peer / server disconnect / silent hangs. Without these
+        # guardrails the step can either die mid-batch (taking the rest
+        # of the pipeline with it) or hang until the job-level 60min
+        # timeout fires. Cap at 25min and treat any failure as
+        # non-fatal — the article markdown + brand assets should still
+        # commit + build + deploy, and the next cron's Backfill step
+        # picks up under-imaged articles.
+        timeout-minutes: 25
+        continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
