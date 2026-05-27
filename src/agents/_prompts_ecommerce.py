@@ -148,6 +148,7 @@ Reply with a single JSON object (no surrounding prose, no fences). Schema:
   "slug": "<kebab-case slug, ASCII only, max 60 chars>",
   "meta_description": "<140-160 chars, end with implicit CTA>",
   "h1": "<the article H1>",
+  "quick_answer": "<1-2 sentences answering the search query directly. Renders as a callout card above the article body so sellers get the answer without scrolling. Concrete + specific, not a hedged preamble. Max 240 chars.>",
   "primary_platform": "<one of: amazon_fba, shopify, etsy, tiktok_shop, multi>",
   "search_intent": "<one of: informational, commercial, transactional, navigational>",
   "featured_tool": "<{brand_name} tool slug to deep-link in CTA, or null>",
