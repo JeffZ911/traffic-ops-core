@@ -81,7 +81,8 @@ class LLMError(Exception):
 # model + a working replacement.
 MODEL_FALLBACKS: dict[str, list[str]] = {
     # Text — flash tier
-    "gemini-3.1-flash-lite-preview": ["gemini-3.1-flash-preview", "gemini-3-flash-preview"],
+    "gemini-3.1-flash-lite-preview": ["gemini-3.1-flash-lite", "gemini-3.1-flash-preview", "gemini-3-flash-preview"],
+    "gemini-3.1-flash-lite":         ["gemini-3.1-flash-preview", "gemini-3-flash-preview", "gemini-2.5-flash"],
     "gemini-3.1-flash-preview":      ["gemini-3-flash-preview", "gemini-2.5-flash"],
     "gemini-3-flash-preview":        ["gemini-2.5-flash"],
     # Text — pro tier

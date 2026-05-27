@@ -398,16 +398,14 @@ def run_affiliate_seed(
     )
 
     provider = get_llm_provider("gemini")
-    # Use gemini-2.5-flash specifically (NOT the configured keyword_research_model)
-    # because:
-    #   1) gemini-3-flash-preview is a thinking model whose chain-of-thought
-    #      leaks into .text as "***\n" preambles, making JSON parsing
-    #      unreliable (this is the bug we chased through 4 runs).
-    #   2) gemini-2.5-flash is non-thinking + strict json_mode-compliant +
-    #      half the cost. The affiliate seed task is small (6 short keywords),
-    #      doesn't need 3.x-tier reasoning.
-    # Auto-fallback in llm.py catches the (unlikely) case 2.5-flash retires.
-    model = "gemini-2.5-flash"
+    # Use gemini-3.1-flash-lite (stable, non-preview, no thinking step leak).
+    # gemini-3.1-flash-lite-preview was retired by Google 2026-05-26; the
+    # NON-preview variant ("gemini-3.1-flash-lite") is the stable replacement.
+    # Cheapest 3.x-tier model — affiliate seed is a tiny call (6 short
+    # keywords), no reason to spend 3-flash-preview compute on it.
+    # llm.py MODEL_FALLBACKS adds a chain so if Google ever retires this
+    # variant too, we cascade gracefully to gemini-2.5-flash.
+    model = "gemini-3.1-flash-lite"
     print(f"\n🛒 Affiliate seed: generating {n_target} gear keywords "
           f"(category-balanced, single-audience, model={model})")
     try:
