@@ -63,9 +63,23 @@ def _list_today_articles(cur, site_id: str) -> list[dict]:
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _LONG_TOKEN_RE = re.compile(r"\S{40,}")
 
+# Inline-content tags whose body NEVER renders as visible text — JSON-LD,
+# inline JS, inline CSS, SVG defs, noscript fallbacks. The earlier check
+# was scanning these and flagging schema.org JSON-LD URLs + JS code as
+# "overflow risk" (false positives — they're inside <script> blocks that
+# the browser doesn't paint). Strip them BEFORE running the token regex.
+_SCRIPT_BLOCK_RE = re.compile(
+    r"<(script|style|noscript|template)\b[^>]*>.*?</\1>",
+    re.IGNORECASE | re.DOTALL,
+)
+
 
 def _strip_tags(html: str) -> str:
-    return _HTML_TAG_RE.sub(" ", html)
+    # First drop the entire body of script/style/noscript blocks — their
+    # contents (JSON-LD, JS, CSS) are never visible to readers and must
+    # not be evaluated by the overflow heuristic.
+    cleaned = _SCRIPT_BLOCK_RE.sub(" ", html)
+    return _HTML_TAG_RE.sub(" ", cleaned)
 
 
 def _find_long_tokens(text: str) -> list[str]:
