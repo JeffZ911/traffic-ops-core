@@ -57,7 +57,11 @@ CONFIG: dict = {
         "writing_model": "gemini-3-flash-preview",
         "qa_model": "gemini-3.1-pro-preview",
         "outline_model": "gemini-3-flash-preview",
-        "keyword_research_model": "gemini-3.1-flash-lite-preview",
+        # 2026-05-26: gemini-3.1-flash-lite-preview was retired by Google
+        # (404 NOT_FOUND), crashing keyword_gardener. Falls back to the
+        # same flash model used for outline. Re-run scripts/migrate_model_names.py
+        # if Google retires anything else.
+        "keyword_research_model": "gemini-3-flash-preview",
         "report_summary_model": "gemini-3-flash-preview",
         "fallback_provider": None,
     },

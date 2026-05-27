@@ -1,0 +1,47 @@
+name: Migrate retired Gemini model names (one-shot)
+
+# Manual button: Actions tab → "Migrate retired Gemini model names" → Run workflow
+#
+# Rewrites stale Gemini model IDs in sites.config (text_provider block)
+# to currently-available equivalents. Required because Google retired
+# `gemini-3.1-flash-lite-preview` on/before 2026-05-26, which crashes
+# the keyword_gardener step of content_daily, which fails the whole
+# cron 6×/day.
+#
+# Idempotent: re-runs cleanly when models are already current.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run? Type "true" for report-only, "false" to actually update DB'
+        required: true
+        default: 'false'
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install deps
+        run: pip install -e .
+
+      - name: Run migration
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            python -m scripts.migrate_model_names --dry-run
+          else
+            python -m scripts.migrate_model_names
+          fi

@@ -60,7 +60,8 @@ EXPECTED_TRIGGERS = {
 EXPECTED_MODEL_IDS = [
     "gemini-3.1-pro-preview",
     "gemini-3-flash-preview",
-    "gemini-3.1-flash-lite-preview",
+    # gemini-3.1-flash-lite-preview retired by Google 2026-05-26 — removed
+    # so verify_schema flags any lingering reference to it.
     "gemini-2.5-flash-image",
     "gemini-3.1-flash-image-preview",
     "gemini-3-pro-image-preview",
