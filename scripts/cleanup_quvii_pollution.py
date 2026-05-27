@@ -50,13 +50,16 @@ def main() -> int:
         print(f"quvii.com site_id = {site_id}")
 
         # ── 1. Polluted articles (gaming-themed under camera_* type) ──
-        # We identify by title/slug containing gaming tokens. Quvii's
-        # legitimate articles never reference NTE / gacha / MMO etc.
-        ilike_clauses = " OR ".join([f"lower(coalesce(title,slug)) like '%{p}%'" for p in GAMING_TOKEN_PATTERNS])
+        # Proper parameterized query — earlier f-string version put '%nte%'
+        # directly into SQL text and psycopg saw '%n' as an invalid
+        # placeholder. Each pattern is now a separate %s param wrapped
+        # with '%' on the Python side before psycopg sees it.
+        like_patterns = [f"%{p}%" for p in GAMING_TOKEN_PATTERNS]
+        like_sql = " OR ".join(["lower(coalesce(title,slug)) like %s"] * len(like_patterns))
         cur.execute(
             f"select id, slug, title, article_type, status from articles "
-            f"where site_id = %s and ({ilike_clauses})",
-            (site_id,),
+            f"where site_id = %s and ({like_sql})",
+            (site_id, *like_patterns),
         )
         bad_articles = cur.fetchall()
         if bad_articles:
@@ -77,12 +80,12 @@ def main() -> int:
         else:
             print("✓ no polluted articles found")
 
-        # ── 2. Polluted keywords ──
-        ilike_kw_clauses = " OR ".join([f"lower(keyword) like '%{p}%'" for p in GAMING_TOKEN_PATTERNS])
+        # ── 2. Polluted keywords (same parameterization fix as above) ──
+        like_kw_sql = " OR ".join(["lower(keyword) like %s"] * len(like_patterns))
         cur.execute(
             f"select id, keyword, source from keywords "
-            f"where site_id = %s and ({ilike_kw_clauses})",
-            (site_id,),
+            f"where site_id = %s and ({like_kw_sql})",
+            (site_id, *like_patterns),
         )
         bad_keywords = cur.fetchall()
         if bad_keywords:
