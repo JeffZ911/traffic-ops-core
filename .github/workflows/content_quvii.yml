@@ -265,13 +265,26 @@ jobs:
         working-directory: quvii-site
         run: |
           set -e
+          # Diagnostic — what's in working tree before staging
+          echo "── pwd: $(pwd)  user: $(git config user.name) ──"
+          echo "── git status BEFORE add ──"
+          git status --short || true
+          echo "── recent .md files under src/content ──"
+          find src/content -type f -name '*.md' 2>/dev/null | head -10 || true
+          echo "── public/img dirs ──"
+          find public/img -maxdepth 2 -type d 2>/dev/null | head -10 || true
+
           git add src/content public/img public/_redirects 2>/dev/null || true
+
+          echo "── git status AFTER add ──"
+          git status --short || true
+
           if git diff --cached --quiet; then
             echo "ℹ️  no new content this cron — skipping commit"
             exit 0
           fi
           STAMP="$(date -u +%Y-%m-%d-%H%MZ)"
-          git commit -m "[auto-cron pixelmatch] content batch $STAMP (run ${{ github.run_id }})"
+          git commit -m "[auto-cron quvii] content batch $STAMP (run ${{ github.run_id }})"
           attempt=0
           until git push origin HEAD:main; do
             attempt=$((attempt + 1))

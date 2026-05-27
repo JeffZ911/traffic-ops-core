@@ -135,6 +135,15 @@ def _is_ecom(config: dict) -> bool:
     return (config.get("niche") or "gaming") == "ecommerce_tools"
 
 
+def _niche(config: dict) -> str:
+    """Canonical niche string. Three values today:
+      "gaming" — ntecodex
+      "ecommerce_tools" — pixelmatch
+      "security_cameras" — quvii
+    Add new niches as new brands launch."""
+    return config.get("niche") or "gaming"
+
+
 # ── Trend-jacking ("蹭话题") prompts. Capture RISING interest so a young,
 # low-authority site can win the QDF (Query-Deserves-Freshness) window before
 # established sites publish. Source-bound to avoid fabricating new specifics.
@@ -424,8 +433,22 @@ def run_affiliate_seed(
     audience gear like chairs/keyboards), ecommerce uses
     ECOM_AFFILIATE_PROMPT_TEMPLATE (seller equipment like cameras/lights).
     Skipped when the corresponding comparison article_type is blacklisted.
+
+    security_cameras niche: SKIPPED entirely. The niche IS the affiliate
+    surface (every article in the niche is camera-shopper-intent); the
+    bootstrap_quvii seed keywords + later AI-generated camera keywords
+    already serve as the "affiliate pool". Running the gaming/ecom
+    affiliate seed for this niche pollutes the pool with off-topic
+    (e.g. gaming chairs / FBA equipment) keywords. Add a dedicated
+    security-camera affiliate template later if we want auto-expand
+    the pool — for now the bootstrap seeds + manual additions suffice.
     """
-    ecom = _is_ecom(config)
+    niche = _niche(config)
+    if niche == "security_cameras":
+        print(f"   🛒 affiliate seed: skipped (niche={niche} — pool seeded directly)")
+        return 0
+
+    ecom = (niche == "ecommerce_tools")
     type_blacklist = list((config.get("content_plan") or {}).get("type_blacklist") or [])
     target_type = "vs_comparison" if ecom else "comparison"
     if target_type in type_blacklist:
