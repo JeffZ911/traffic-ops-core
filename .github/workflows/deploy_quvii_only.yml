@@ -1,0 +1,37 @@
+name: Deploy quvii-site only (no LLM, no commit)
+
+# Lightweight workflow — only `npm run build` + `wrangler pages deploy`.
+# Use to ship pure-static changes (sitemap.xml, ads.txt, layout tweaks)
+# without burning LLM cost on the full content_quvii cron.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout quvii-site
+        uses: actions/checkout@v4
+        with:
+          repository: JeffZ911/quvii-site
+          token: ${{ secrets.QUVII_SITE_REPO_PAT }}
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install + build
+        run: |
+          npm install
+          npm run build
+
+      - name: Deploy to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx --yes wrangler@latest pages deploy dist \
+            --project-name quvii-site --branch main --commit-dirty=true
