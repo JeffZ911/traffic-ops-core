@@ -494,10 +494,11 @@ class PublishAgent(BaseAgent):
         #   - strip URLs the LLM hallucinated but anchor is a generic
         #     phrase — anchor text remains, link is gone.
         # See src/content/link_rewriter.py for the rule schema.
-        from src.content.link_rewriter import rewrite_markdown, rule_for_domain
+        from src.content.link_rewriter import rewrite_markdown, rule_for_site
         site_domain = self.site_config.get("domain") or ""
+        site_niche  = self.site_config.get("niche")
         rewrite_override = self.site_config.get("link_rewriter") or {}
-        rule = rule_for_domain(site_domain, override=rewrite_override)
+        rule = rule_for_site(site_domain, niche=site_niche, override=rewrite_override)
         if rule.amazon_tag or rule.brand_patterns:  # rule actually configured
             report = rewrite_markdown(content_md, rule)
             if report.rewritten or report.stripped:

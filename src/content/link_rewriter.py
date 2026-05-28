@@ -237,13 +237,31 @@ SHARED_EDITORIAL = [
     "ftc.gov",
 ]
 
-DEFAULTS_BY_DOMAIN: dict[str, dict] = {
-    # ──────────────── quvii.com (security cameras) ────────────────
-    "quvii.com": {
-        "amazon_tag": "jeffzen911-20",
-        "amazon_tld": "com",
+# Amazon Associates tag — shared across all Jeff's sites today.
+# A new site automatically inherits this. Override only via
+# sites.config.link_rewriter.amazon_tag if a site needs a different
+# affiliate account.
+DEFAULT_AMAZON_TAG = "jeffzen911-20"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# NICHE_DEFAULTS — keyed by sites.config.niche, NOT by domain.
+#
+# A new site (e.g. "smartthings-fan-blog.com") with niche="smart_home"
+# automatically inherits the smart_home brand_patterns + allowlists.
+# No code changes needed to onboard the new domain — just set its
+# niche in the bootstrap_<site>.py + sites.config.
+#
+# Add a new niche entry below when a brand-new category launches.
+# Per-site overrides go in DEFAULTS_BY_DOMAIN (rare) or in
+# sites.config.link_rewriter (Dashboard-edited, takes top precedence).
+# ─────────────────────────────────────────────────────────────────────
+
+NICHE_DEFAULTS: dict[str, dict] = {
+    # ──────────────── security_cameras (quvii) ────────────────
+    "security_cameras": {
         "brand_patterns": [
-            # Major D2C/retail security camera brands. Anchor substrings.
+            # Major D2C/retail security camera brands.
             "eufy", "eufycam", "solocam",
             "ring",
             "arlo",
@@ -262,7 +280,6 @@ DEFAULTS_BY_DOMAIN: dict[str, dict] = {
             "annke",
             "anker",
         ],
-        # Third-party editorial sources we trust to cite the brand correctly.
         "editorial_allowlist": SHARED_EDITORIAL + [
             "rtings.com",
             "wirecutter.com",
@@ -275,8 +292,6 @@ DEFAULTS_BY_DOMAIN: dict[str, dict] = {
             "reddit.com/r/homedefense",
             "reddit.com/r/amazonring",
         ],
-        # Manufacturer official sites — kept only when anchor is NOT brand-like
-        # (e.g. a help-center / privacy-policy link, not a product link).
         "manufacturer_allowlist": [
             "eufy.com", "us.eufy.com",
             "ring.com",
@@ -290,12 +305,9 @@ DEFAULTS_BY_DOMAIN: dict[str, dict] = {
         ],
     },
 
-    # ──────────────── ntecodex.com (gaming + adjacent gear) ────────────────
-    "ntecodex.com": {
-        "amazon_tag": "jeffzen911-20",
-        "amazon_tld": "com",
+    # ──────────────── gaming (ntecodex) ────────────────
+    "gaming": {
         "brand_patterns": [
-            # Physical-product brands ntecodex articles recommend.
             "secretlab",
             "autonomous",
             "uplift desk", "uplift",
@@ -350,15 +362,13 @@ DEFAULTS_BY_DOMAIN: dict[str, dict] = {
         ],
     },
 
-    # ──────────────── pixelmatch.art (e-commerce / AI image tools) ────────────────
-    "pixelmatch.art": {
-        "amazon_tag": "jeffzen911-20",
-        "amazon_tld": "com",
+    # ──────────────── ecommerce_tools (pixelmatch) ────────────────
+    "ecommerce_tools": {
         "brand_patterns": [
-            # Physical product brands appropriate for Amazon search.
-            # SaaS tools (Canva, Adobe, Claid) are intentionally NOT
-            # in brand_patterns — Amazon search for "Canva" surfaces
-            # unrelated merch. SaaS brand anchors will strip cleanly.
+            # Physical hardware brands relevant to FBA / Etsy / Shopify
+            # sellers (camera gear, lighting, color tools). SaaS brands
+            # (Canva, Adobe, Claid) are intentionally absent — Amazon
+            # search for "Canva" returns unrelated merch.
             "godox",
             "neewer",
             "westcott",
@@ -385,11 +395,8 @@ DEFAULTS_BY_DOMAIN: dict[str, dict] = {
             "wired.com",
         ],
         "manufacturer_allowlist": [
-            # Path-specific entries only. Apex SaaS domains are
-            # excluded because LLM hallucinates URLs like
-            # claid.ai/fake-url and canva.com/nonexistent. Specific
-            # known-stable paths (docs, blogs, official help) survive;
-            # generic marketing URLs strip cleanly.
+            # Path-specific only. SaaS apex domains excluded —
+            # LLM hallucinates canva.com/X and claid.ai/X.
             "canva.com/help",
             "canva.com/blog",
             "helpx.adobe.com",
@@ -402,23 +409,398 @@ DEFAULTS_BY_DOMAIN: dict[str, dict] = {
             "anthropic.com/news",
         ],
     },
+
+    # ──────────────── smart_home (future Quvii-adjacent niches) ────────────────
+    "smart_home": {
+        "brand_patterns": [
+            # Smart locks, doorbells, hubs, lighting, plugs.
+            "philips hue", "hue",
+            "lifx",
+            "lutron", "caseta",
+            "ecobee",
+            "honeywell home",
+            "nest", "google nest",
+            "amazon echo", "echo dot", "echo show",
+            "ring", "ring doorbell",
+            "august lock", "august smart",
+            "yale", "schlage",
+            "kwikset",
+            "level lock",
+            "wemo",
+            "tp-link", "kasa", "tapo",
+            "smartthings", "samsung smartthings",
+            "aqara",
+            "lockly",
+            "ubiquiti", "unifi",
+            "eero",
+        ],
+        "editorial_allowlist": SHARED_EDITORIAL + [
+            "rtings.com",
+            "wirecutter.com",
+            "theverge.com",
+            "tomsguide.com",
+            "cnet.com",
+            "thesweethome.com",
+            "the-ambient.com",
+            "stacey-on-iot.com",
+        ],
+        "manufacturer_allowlist": [
+            "philips-hue.com", "meethue.com",
+            "lifx.com",
+            "lutron.com", "casetawireless.com",
+            "ecobee.com",
+            "honeywellhome.com",
+            "store.google.com",
+            "ring.com",
+            "august.com",
+            "yalehome.com",
+            "schlage.com",
+            "level.co",
+            "smartthings.com",
+            "aqara.com",
+            "ui.com",          # ubiquiti
+            "eero.com",
+        ],
+    },
+
+    # ──────────────── audio_gear ────────────────
+    "audio_gear": {
+        "brand_patterns": [
+            "bose",
+            "sony wh", "sony wf",
+            "sennheiser",
+            "shure",
+            "audio-technica", "audio technica",
+            "akg",
+            "beyerdynamic",
+            "focal",
+            "klipsch",
+            "kef",
+            "jbl",
+            "sonos",
+            "apple airpods", "airpods",
+            "beats", "beats by dre",
+            "anker soundcore", "soundcore",
+            "jabra",
+            "razer",
+            "logitech",
+            "hifiman",
+            "drop",
+            "schiit",
+        ],
+        "editorial_allowlist": SHARED_EDITORIAL + [
+            "rtings.com",
+            "wirecutter.com",
+            "theverge.com",
+            "whathifi.com",
+            "soundguys.com",
+            "head-fi.org",
+            "audioholics.com",
+        ],
+        "manufacturer_allowlist": [
+            "bose.com",
+            "sony.com",
+            "sennheiser.com",
+            "shure.com",
+            "audio-technica.com",
+            "sonos.com",
+            "apple.com/airpods",
+            "beatsbydre.com",
+            "soundcore.com",
+        ],
+    },
+
+    # ──────────────── home_office / desk-setup ────────────────
+    "home_office": {
+        "brand_patterns": [
+            "uplift desk", "uplift",
+            "fully", "jarvis", "fully jarvis",
+            "secretlab",
+            "herman miller",
+            "steelcase",
+            "humanscale",
+            "autonomous",
+            "ikea bekant", "ikea markus",
+            "branch furniture",
+            "vari", "vari desk",
+            "flexispot",
+            "logitech",
+            "anker",
+            "elgato",
+            "balance ball",
+        ],
+        "editorial_allowlist": SHARED_EDITORIAL + [
+            "rtings.com",
+            "wirecutter.com",
+            "theverge.com",
+            "tomsguide.com",
+            "ergonomics.com",
+            "officechairsource.com",
+        ],
+        "manufacturer_allowlist": [
+            "upliftdesk.com",
+            "fully.com",
+            "secretlab.co",
+            "hermanmiller.com",
+            "steelcase.com",
+            "humanscale.com",
+            "autonomous.ai",
+            "flexispot.com",
+            "logitech.com",
+        ],
+    },
+
+    # ──────────────── fitness_gear ────────────────
+    "fitness_gear": {
+        "brand_patterns": [
+            "peloton",
+            "nordictrack",
+            "bowflex",
+            "lululemon",
+            "garmin", "garmin fenix", "garmin forerunner",
+            "apple watch",
+            "fitbit",
+            "polar",
+            "whoop",
+            "oura", "oura ring",
+            "theragun", "therabody",
+            "hyperice",
+            "rogue fitness", "rogue",
+            "concept2",
+            "tonal",
+            "mirror",
+            "hyrox",
+            "rumble roller",
+            "trx",
+        ],
+        "editorial_allowlist": SHARED_EDITORIAL + [
+            "wirecutter.com",
+            "rtings.com",
+            "theverge.com",
+            "outdoorgearlab.com",
+            "runnersworld.com",
+            "selfmagazine.com",
+            "menshealth.com",
+            "womenshealthmag.com",
+        ],
+        "manufacturer_allowlist": [
+            "onepeloton.com",
+            "nordictrack.com",
+            "bowflex.com",
+            "garmin.com",
+            "fitbit.com",
+            "ouraring.com",
+            "whoop.com",
+            "therabody.com",
+            "concept2.com",
+            "roguefitness.com",
+            "tonal.com",
+            "lululemon.com",
+        ],
+    },
+
+    # ──────────────── pet_products ────────────────
+    "pet_products": {
+        "brand_patterns": [
+            "petcube",
+            "furbo",
+            "wyze cam pan",       # also caught by gaming/security cams
+            "litter-robot", "litter robot",
+            "petsafe",
+            "sureflap",
+            "kong",
+            "chuckit",
+            "outward hound",
+            "petfusion",
+            "snuggle puppy",
+            "frisco",
+            "chewy",              # brand often appears as anchor
+            "blue buffalo",
+            "purina",
+            "hill's", "hills science diet",
+            "royal canin",
+        ],
+        "editorial_allowlist": SHARED_EDITORIAL + [
+            "wirecutter.com",
+            "rover.com",
+            "akc.org",
+            "aspca.org",
+            "petmd.com",
+            "consumeraffairs.com",
+        ],
+        "manufacturer_allowlist": [
+            "petcube.com",
+            "furbo.com",
+            "litter-robot.com",
+            "petsafe.net",
+            "sureflap.com",
+            "chewy.com",
+        ],
+    },
+
+    # ──────────────── outdoor_recreation ────────────────
+    "outdoor_recreation": {
+        "brand_patterns": [
+            "yeti",
+            "rtic",
+            "hydro flask",
+            "stanley",
+            "patagonia",
+            "the north face", "north face",
+            "rei", "rei co-op",
+            "msr",
+            "big agnes",
+            "nemo",
+            "rei", "kelty",
+            "osprey",
+            "thermarest",
+            "garmin inreach", "inreach",
+            "goal zero",
+            "jackery",
+            "ego power+", "ego",
+            "blackstone",
+            "weber",
+            "traeger",
+            "coleman",
+        ],
+        "editorial_allowlist": SHARED_EDITORIAL + [
+            "wirecutter.com",
+            "outdoorgearlab.com",
+            "thedyrt.com",
+            "treelinereview.com",
+            "switchbacktravel.com",
+            "outsideonline.com",
+            "rei.com/learn",
+            "backpacker.com",
+        ],
+        "manufacturer_allowlist": [
+            "yeti.com",
+            "hydroflask.com",
+            "stanley1913.com",
+            "patagonia.com",
+            "thenorthface.com",
+            "rei.com",
+            "ospreypacks.com",
+            "garmin.com",
+            "goalzero.com",
+            "jackery.com",
+        ],
+    },
+
+    # ──────────────── creator_tools (cameras, mics, streaming) ────────────────
+    "creator_tools": {
+        "brand_patterns": [
+            "sony alpha", "sony a7", "sony a6",
+            "canon eos", "canon r5", "canon r6",
+            "fujifilm xt", "fujifilm x-t",
+            "panasonic lumix",
+            "blackmagic", "blackmagic pocket",
+            "dji",
+            "gopro",
+            "insta360",
+            "rode", "rode wireless go", "rode podmic",
+            "shure",
+            "elgato",
+            "stream deck",
+            "atomos",
+            "godox",
+            "aputure",
+            "manfrotto",
+            "peak design",
+            "smallrig",
+            "tilta",
+        ],
+        "editorial_allowlist": SHARED_EDITORIAL + [
+            "dpreview.com",
+            "the-verge.com",
+            "theverge.com",
+            "wirecutter.com",
+            "petapixel.com",
+            "noamkroll.com",
+            "fstoppers.com",
+            "diyphotography.net",
+        ],
+        "manufacturer_allowlist": [
+            "sony.com",
+            "canon.com",
+            "fujifilm-x.com",
+            "panasonic.com",
+            "blackmagicdesign.com",
+            "dji.com",
+            "gopro.com",
+            "insta360.com",
+            "rode.com",
+            "elgato.com",
+            "atomos.com",
+            "godox.com",
+            "aputure.com",
+            "peakdesign.com",
+        ],
+    },
 }
 
 
-def rule_for_domain(domain: str, override: dict | None = None) -> RewriteRule:
-    """Resolve the RewriteRule for a site domain.
+# ─────────────────────────────────────────────────────────────────────
+# DEFAULTS_BY_DOMAIN — site-specific overrides for the niche defaults.
+#
+# Rare. Use only when a single site within a niche needs different
+# brand_patterns than the niche default (e.g. one quvii sister-site
+# focuses on commercial CCTV instead of consumer cams). Most sites
+# inherit niche defaults and don't need anything here.
+# ─────────────────────────────────────────────────────────────────────
 
-    Precedence: explicit override (e.g. from sites.config.link_rewriter
-    fetched at runtime) → DEFAULTS_BY_DOMAIN[domain] → empty rule.
+DEFAULTS_BY_DOMAIN: dict[str, dict] = {
+    # (empty by default — niche resolution handles all 3 existing
+    # sites. Add domain-specific overrides here if a site diverges
+    # from its niche's defaults.)
+}
+
+
+def rule_for_site(
+    domain: str,
+    niche: str | None = None,
+    override: dict | None = None,
+) -> RewriteRule:
+    """Resolve the RewriteRule for a site.
+
+    Precedence (top wins):
+      1. `override`              — sites.config.link_rewriter from DB
+      2. DEFAULTS_BY_DOMAIN[domain] — explicit per-domain config
+      3. NICHE_DEFAULTS[niche]     — niche-shared defaults
+      4. empty rule (rewrite is a no-op)
+
+    A new site only needs `niche` set to inherit a working rule. The
+    Amazon Associates tag defaults to DEFAULT_AMAZON_TAG.
     """
-    base = DEFAULTS_BY_DOMAIN.get(domain, {})
+    base: dict = {}
+    if niche and niche in NICHE_DEFAULTS:
+        base = {**NICHE_DEFAULTS[niche]}
+    if domain in DEFAULTS_BY_DOMAIN:
+        base = {**base, **{k: v for k, v in DEFAULTS_BY_DOMAIN[domain].items() if v}}
     if override:
-        # Shallow merge — override fields take precedence.
         base = {**base, **{k: v for k, v in override.items() if v}}
+
     return RewriteRule(
-        amazon_tag=base.get("amazon_tag", ""),
+        amazon_tag=base.get("amazon_tag", DEFAULT_AMAZON_TAG),
         amazon_tld=base.get("amazon_tld", "com"),
         brand_patterns=list(base.get("brand_patterns") or []),
         editorial_allowlist=list(base.get("editorial_allowlist") or []),
         manufacturer_allowlist=list(base.get("manufacturer_allowlist") or []),
     )
+
+
+# Back-compat shim — existing callers used rule_for_domain(). New code
+# should call rule_for_site(domain, niche=...).
+_NICHE_BY_LEGACY_DOMAIN = {
+    "quvii.com":      "security_cameras",
+    "ntecodex.com":   "gaming",
+    "pixelmatch.art": "ecommerce_tools",
+}
+
+
+def rule_for_domain(domain: str, override: dict | None = None) -> RewriteRule:
+    """Deprecated. Use rule_for_site(domain, niche=...) instead.
+    Kept for the 3 existing sites whose niche we know from their
+    domain. New sites should always call rule_for_site directly."""
+    niche = _NICHE_BY_LEGACY_DOMAIN.get(domain)
+    return rule_for_site(domain, niche=niche, override=override)
