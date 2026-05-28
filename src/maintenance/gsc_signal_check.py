@@ -203,6 +203,7 @@ def main() -> int:
     # --- Positive-signal alert (only on new top-10s) ---
     if new_top10:
         body_lines = [
+            f"Site: {site_domain}",
             f"🎉 First-time top-10 ranking on Google!",
             f"  window: {data.get('window')}",
             "",
@@ -228,7 +229,7 @@ def main() -> int:
         else:
             try:
                 send_alert(
-                    subject=f"[ntecodex] 🎉 New top-10 keyword(s) — {len(new_top10)} first hits",
+                    subject=f"[{site_domain}] 🎉 New top-10 keyword(s) — {len(new_top10)} first hits",
                     body=body, severity="info",
                 )
                 print(f"  ✓ positive-signal alert sent")
@@ -257,6 +258,7 @@ def main() -> int:
             already_emailed = bool(r and r[0])
         if not already_emailed:
             body = (
+                f"Site: {site_domain}\n"
                 f"GSC stagnation — last 7 days:\n"
                 f"  total impressions: {total_impressions} (< {IMPRESSIONS_FLOOR})\n"
                 f"  keywords in top 30: {top30_count}\n"
@@ -267,6 +269,7 @@ def main() -> int:
                 f"- E-E-A-T signals too weak (consider adding About / Author pages)\n"
                 f"- Niche over-saturated by established competitors\n"
                 f"- Recent content quality regression — check qa_failed rate\n"
+                f"- GSC property misconfigured (sitemap not reachable from root)\n"
             )
             if args.dry_run:
                 print("\n--- stagnation email (dry-run) ---")
@@ -274,7 +277,7 @@ def main() -> int:
             else:
                 try:
                     send_alert(
-                        subject=f"[ntecodex] GSC stagnation — 7d impressions {total_impressions}",
+                        subject=f"[{site_domain}] GSC stagnation — 7d impressions {total_impressions}",
                         body=body, severity="warning",
                     )
                 except Exception as e:
