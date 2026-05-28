@@ -265,7 +265,17 @@ jobs:
         working-directory: pixelmatch-site
         run: |
           set -e
-          git add src/content public/img public/_redirects 2>/dev/null || true
+          # Per-path add: git add is all-or-nothing when given multiple
+          # pathspecs — if any one doesn't exist on disk (very common:
+          # public/_redirects only exists when content_daily seeds it,
+          # public/img is empty when image gen fails or is skipped), the
+          # ENTIRE add fails with exit 128 and stages nothing. The `|| true`
+          # then silently swallows it, `git diff --cached --quiet` matches,
+          # and the step exits 0 with "no new content" while real .md /
+          # .webp files sit un-committed. Add each path independently.
+          git add src/content 2>/dev/null || true
+          git add public/img 2>/dev/null || true
+          git add public/_redirects 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "ℹ️  no new content this cron — skipping commit"
             exit 0
