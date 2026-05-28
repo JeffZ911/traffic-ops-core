@@ -51,6 +51,11 @@ def main() -> int:
             print(f"❌ site {site_domain!r} not found in sites table")
             return 2
         site_id, config = site_row
+        # Make the domain available to downstream agents (PublishAgent
+        # uses it to look up the per-site link_rewriter rule).
+        if not isinstance(config, dict):
+            config = {}
+        config["domain"] = site_domain
 
         cur.execute(
             "select id, slug, article_type, qa_score from articles "

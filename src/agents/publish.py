@@ -485,6 +485,29 @@ class PublishAgent(BaseAgent):
                 date_iso=published_at.date().isoformat(),
             )
 
+        # ──── Phase 3.0 (2026-05-28): defensive link rewrite ────
+        # The writer agent reliably hallucinates external URLs. Run
+        # the per-site link_rewriter to:
+        #   - convert product-brand anchors into Amazon search URLs
+        #     with the site's affiliate tag (rel="sponsored nofollow")
+        #   - preserve editorial sources (Wikipedia, RTINGS, FCC, etc.)
+        #   - strip URLs the LLM hallucinated but anchor is a generic
+        #     phrase — anchor text remains, link is gone.
+        # See src/content/link_rewriter.py for the rule schema.
+        from src.content.link_rewriter import rewrite_markdown, rule_for_domain
+        site_domain = self.site_config.get("domain") or ""
+        rewrite_override = self.site_config.get("link_rewriter") or {}
+        rule = rule_for_domain(site_domain, override=rewrite_override)
+        if rule.amazon_tag or rule.brand_patterns:  # rule actually configured
+            report = rewrite_markdown(content_md, rule)
+            if report.rewritten or report.stripped:
+                print(f"      link_rewriter: {report.summary()}")
+                content_md = report.text
+                # Tag frontmatter so the affiliate-disclosure banner can
+                # auto-mount on articles with rewritten amazon links.
+                if report.rewritten > 0 and not fm.get("affiliate"):
+                    fm["affiliate"] = True
+
         body = (
             "---\n"
             + _emit_yaml(fm)
