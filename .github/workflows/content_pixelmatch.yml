@@ -111,8 +111,11 @@ jobs:
             --subject="[pixelmatch] daily cron paused — monthly budget at ${{ steps.budget.outputs.percent }}" \
             --message="month-to-date spend ${{ steps.budget.outputs.spent }} of ${{ steps.budget.outputs.budget }}. Daily cron skipped. Resumes automatically on month rollover."
 
-      - name: Alert on budget warn / limit_extras
-        if: steps.budget.outputs.action == 'warn' || steps.budget.outputs.action == 'limit_extras'
+      # Only email at limit_extras (80-95%) — that's actionable. The
+      # 'warn' band (50-80%) is normal mid-month spend and was flooding
+      # the inbox with one info email per cron run (6+/day).
+      - name: Alert on budget limit_extras
+        if: steps.budget.outputs.action == 'limit_extras'
         env:
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
