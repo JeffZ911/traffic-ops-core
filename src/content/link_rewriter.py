@@ -141,13 +141,21 @@ def _classify(anchor: str, url: str, rule: RewriteRule) -> Action:
     # "asus" doesn't fire on "Pegasus" and "ring" doesn't fire on
     # "string" / "spring". The brand has to start at a word boundary
     # in the anchor.
+    #
+    # Guard: if the ANCHOR is itself a URL (the writer sometimes emits a
+    # citation as [https://brand.com/x](https://brand.com/x)), it's a
+    # source reference, NOT a product mention — never turn it into an
+    # Amazon search of the URL string. Let it fall through to the
+    # allowlist/keep/strip logic on its actual destination.
     anchor_lc = anchor.lower()
-    for brand in rule.brand_patterns:
-        if not brand:
-            continue
-        b = brand.lower()
-        if re.search(r"\b" + re.escape(b), anchor_lc):
-            return "amazon"
+    anchor_is_url = anchor_lc.startswith(("http://", "https://", "www."))
+    if not anchor_is_url:
+        for brand in rule.brand_patterns:
+            if not brand:
+                continue
+            b = brand.lower()
+            if re.search(r"\b" + re.escape(b), anchor_lc):
+                return "amazon"
 
     # 4. AMAZON — any amazon.com URL that isn't a verified /dp/ or
     # /gp/ product page. This catches:
