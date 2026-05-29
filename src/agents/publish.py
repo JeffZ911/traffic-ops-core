@@ -509,6 +509,24 @@ class PublishAgent(BaseAgent):
                 if report.rewritten > 0 and not fm.get("affiliate"):
                     fm["affiliate"] = True
 
+        # ---- Dead-link validation (HTTP check) ----
+        # After brand/hallucination rewriting, HTTP-check whatever URLs
+        # remain (inline + Sources-list) and strip the genuinely-dead
+        # ones (404/410). 403/timeout/5xx are KEPT — those are
+        # bot-blocks on real pages. Conservative by design; see
+        # src/content/link_validator.py.
+        try:
+            from src.content.link_validator import validate_markdown
+            vreport = validate_markdown(content_md)
+            if vreport.dead > 0:
+                print(f"      link_validator: {vreport.summary()}")
+                for d in vreport.dead_links[:10]:
+                    print(f"        ✗ {d.status} [{d.shape}] {d.url[:70]}")
+                content_md = vreport.text
+        except Exception as e:
+            # Network hiccup in CI must never block a publish. Log + skip.
+            print(f"      link_validator: skipped ({e})")
+
         body = (
             "---\n"
             + _emit_yaml(fm)
