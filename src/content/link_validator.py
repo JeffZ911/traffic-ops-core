@@ -164,6 +164,13 @@ def validate_markdown(
     if not dead_urls:
         return report
 
+    # CRITICAL: never touch the YAML frontmatter block. Split it off and
+    # process ONLY the body. (An earlier version ran the line-tidy pass
+    # over the whole document and its `[—\-:]$` regex ate the trailing
+    # ':' from YAML keys like `sources:` and a '-' from the `---` fence,
+    # corrupting frontmatter across every article that had a dead link.)
+    frontmatter, body = _split_frontmatter(md)
+
     # ---- strip dead inline links: [anchor](dead) → anchor ----
     def _strip_inline(m: re.Match) -> str:
         url = _norm(m.group("url"))
@@ -175,7 +182,7 @@ def validate_markdown(
             return m.group("anchor")
         return m.group(0)
 
-    new_md = _INLINE_RE.sub(_strip_inline, md)
+    new_body = _INLINE_RE.sub(_strip_inline, body)
 
     # ---- strip dead bare URLs (Sources lists etc.) ----
     # Order matters: run AFTER inline so we don't touch inline URLs.
@@ -185,24 +192,41 @@ def validate_markdown(
             return m.group(0)
         report.dead += 1
         report.dead_links.append(DeadLink(url, cache.get(url) or 0, "source", None))
-        # Return empty — the surrounding line-cleanup pass tidies the
-        # leftover "Name — " dangling separator.
         return ""
 
-    new_md = _BARE_RE.sub(_strip_bare, new_md)
+    new_body = _BARE_RE.sub(_strip_bare, new_body)
 
-    # ---- tidy Sources-list lines left with a dangling separator ----
-    # "- Axis Communications — " → "- Axis Communications"
-    # "- — " (name-less)         → drop the whole line
-    tidied_lines = []
-    for line in new_md.splitlines():
-        stripped = line.rstrip()
-        # remove trailing " — ", " - ", " : " separators left by URL removal
-        cleaned = re.sub(r"\s*[—\-:]\s*$", "", stripped)
-        # a list item that's now just a bullet + separator with no text → drop
-        if re.fullmatch(r"[-*]\s*", cleaned) or re.fullmatch(r"[-*]\s*[—\-:]?\s*", stripped):
-            continue
-        tidied_lines.append(cleaned if cleaned != stripped else line)
-    report.text = "\n".join(tidied_lines)
+    # ---- tidy ONLY Sources-list bullet lines left with a dangling
+    # separator. Scope is deliberately narrow:
+    #   • only lines matching `^\s*[-*]\s` (markdown list items)
+    #   • only strip a trailing em/en-dash separator (the Sources
+    #     "Name — URL" format) — NEVER ':' or a lone '-' (would damage
+    #     real content / fences).
+    SEP = re.compile(r"\s*[—–]\s*$")             # em / en dash only
+    EMPTY_ITEM = re.compile(r"^\s*[-*]\s*$")     # bullet with nothing left
+    tidied = []
+    for line in new_body.splitlines():
+        if re.match(r"^\s*[-*]\s", line):
+            cleaned = SEP.sub("", line.rstrip())
+            if EMPTY_ITEM.match(cleaned):
+                continue  # drop a now-empty "- " bullet
+            tidied.append(cleaned)
+        else:
+            tidied.append(line)
+    new_body = "\n".join(tidied)
 
+    report.text = frontmatter + new_body
     return report
+
+
+def _split_frontmatter(md: str) -> tuple[str, str]:
+    """Return (frontmatter_including_fences, body). If there's no leading
+    `---` YAML fence, frontmatter is '' and body is the whole string."""
+    if not md.startswith("---"):
+        return "", md
+    # Match the opening fence line + everything up to and including the
+    # closing fence line.
+    m = re.match(r"(---\r?\n.*?\r?\n---\r?\n?)(.*)", md, re.DOTALL)
+    if not m:
+        return "", md
+    return m.group(1), m.group(2)
