@@ -85,21 +85,42 @@ ECOM_STYLE = (
     + _QUALITY + " " + _COPYRIGHT_GUARD
 )
 
-# security_cameras (quvii): STRICT PHOTOREALISM. The reference brands are
-# Apple, DJI, Reolink, Eufy, Ring product pages + RTINGS / Wirecutter
-# hands-on reviews. Hard ban on illustration, anime, 3D-render, cartoon —
-# anything that looks "AI-art-ish" cheapens a security camera buying-guide
-# instantly. Output must read as journalistic product photography.
+# security_cameras (quvii): STRICT PHOTOREALISM, but with an absolute ban on
+# brand marks. CRITICAL LESSON (2026-05-29): the earlier prompt said "in the
+# style of Apple, DJI, Reolink, Eufy marketing pages" — naming real brands
+# ACTIVELY induced the model to stamp those brands' logos onto the rendered
+# cameras (a real Reolink logo appeared on a generated camera = trademark
+# infringement risk). Brand names removed; replaced with generic
+# premium-consumer-tech language + a hard zero-logo / zero-text / anatomy
+# guard appended below.
+_SECURITY_GUARD = (
+    "ABSOLUTE HARD RULES (an image breaking any of these is unusable): "
+    "(1) The device is a GENERIC, UNBRANDED security camera. Render ZERO "
+    "logos, brand marks, wordmarks, model numbers, or any text ANYWHERE — "
+    "not on the camera body, not on packaging, not on screens, not on walls "
+    "or signage in the background. Every surface is blank and unlettered. "
+    "Do NOT reproduce ANY real manufacturer's logo or trade dress; invent a "
+    "neutral, plain, original device design that resembles no existing "
+    "product. "
+    "(2) ANATOMY: if any human hand or body part is visible it MUST be "
+    "anatomically correct — a person has exactly two hands and five fingers "
+    "per hand. NO extra hands, NO extra or missing fingers, NO fused or "
+    "malformed digits. Prefer simple compositions with at most one or two "
+    "hands clearly shown; when in doubt, frame the shot to minimize visible "
+    "hands. "
+    "(3) No real, identifiable human faces."
+)
 SECURITY_CAMERA_STYLE = (
-    "STRICT PHOTOREALISTIC product photography in the style of Apple, DJI, "
-    "Reolink, and Eufy marketing pages. Real DSLR / mirrorless camera output, "
-    "natural studio or in-context lighting, accurate materials (matte plastic, "
-    "brushed aluminum, glass camera lenses with realistic IR ring), shallow "
-    "depth-of-field where appropriate, clean neutral backgrounds or genuine "
-    "in-home/outdoor installation contexts. NO illustration, NO anime, NO "
-    "cartoon, NO 3D-render aesthetic, NO stylized vector art, NO glowing "
-    "magical effects. Looks like an editorial photo from The Verge, "
-    "Tom's Guide, or RTINGS. No logos, no on-screen text. " + _QUALITY
+    "STRICT PHOTOREALISTIC consumer-tech product photography — the clean, "
+    "premium look of a high-end electronics editorial shoot. Real DSLR / "
+    "mirrorless camera output, natural studio or in-context lighting, "
+    "accurate materials (matte plastic, brushed aluminum, glass camera "
+    "lenses with a realistic IR ring), shallow depth-of-field where "
+    "appropriate, clean neutral backgrounds or genuine in-home/outdoor "
+    "installation contexts. NO illustration, NO anime, NO cartoon, NO "
+    "3D-render aesthetic, NO stylized vector art, NO glowing magical "
+    "effects. Reads like an editorial product photo in a respected tech "
+    "publication. " + _SECURITY_GUARD + " " + _QUALITY
 )
 
 
@@ -132,7 +153,8 @@ def hero_prompt(niche: str | None, title: str, *, art_style: str | None = None) 
             "room, or in a garage. Show actual cabling or mount hardware "
             "when relevant. The camera body should look like a real consumer "
             "IP camera — matte plastic shell, glass lens with subtle IR ring, "
-            "small status LED. Generic unbranded body (no Ring/Nest/Eufy logos)."
+            "small status LED — but an ORIGINAL, plain, unbranded design with "
+            "no logo or text on it."
         )
         return f"{subject} {SECURITY_CAMERA_STYLE}"
     if _is_ecom(niche):
@@ -171,9 +193,9 @@ def inline_prompt(
             "drywall, a hand holding a microSD card next to a camera, a "
             "phone showing a generic camera-app UI on a kitchen counter, "
             "a Wi-Fi router on a shelf with a camera in soft focus behind, "
-            "or a side-by-side of two different real-looking IP cameras. "
-            "Compose CLEARLY differently from a cover hero shot — closer, "
-            "more detail-focused, more 'how-to' than 'marketing'."
+            "or a side-by-side of two different original, unbranded IP "
+            "cameras. Compose CLEARLY differently from a cover hero shot — "
+            "closer, more detail-focused, more 'how-to' than 'marketing'."
         )
         return f"{subject} {SECURITY_CAMERA_STYLE}"
     if _is_ecom(niche):
