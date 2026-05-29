@@ -10,6 +10,10 @@ from src.agents._prompts_ecommerce import (
     FACTUAL_RULES as ECOM_FACTUAL_RULES,
     WRITING_PROMPT as ECOM_WRITING_PROMPT,
 )
+from src.agents._prompts_security_cameras import (
+    FACTUAL_RULES as SC_FACTUAL_RULES,
+    SECURITY_WRITING_PROMPT as SC_WRITING_PROMPT,
+)
 from src.agents.base import BaseAgent
 
 
@@ -121,8 +125,14 @@ class WritingAgent(BaseAgent):
     def _execute(self, input_data: dict[str, Any]) -> dict[str, Any]:
         # Niche branch (Phase 1A pixelmatch): ecommerce_tools sites
         # use a B2B SaaS voice + seller-facing factuality rules.
-        if (self.site_config.get("niche") or "gaming") == "ecommerce_tools":
+        niche = self.site_config.get("niche") or "gaming"
+        if niche == "ecommerce_tools":
             return self._execute_ecommerce(input_data)
+        # security_cameras (quvii): advisory camera-buying voice + the
+        # data-table / decision-framework / TCO depth mandates. Before
+        # this branch existed, quvii prose used the gaming default prompt.
+        if niche == "security_cameras":
+            return self._execute_security_cameras(input_data)
 
         from datetime import date as _date
         keyword = input_data["keyword"]
@@ -298,6 +308,76 @@ class WritingAgent(BaseAgent):
             max_words=max_words,
             outline_json=json.dumps(outline, indent=2, ensure_ascii=False),
             feedback_block=feedback_block,
+        )
+
+        resp = self._call_llm(
+            prompt=prompt,
+            max_tokens=12000,
+            temperature=0.7,
+            json_mode=False,
+            enable_search=True,
+        )
+        content = resp.text.strip()
+        if not content:
+            raise RuntimeError("Writing returned empty content (likely thinking-budget issue)")
+
+        body_for_count = re.split(r"\n##\s*Sources\s*\n", content, maxsplit=1)[0]
+        words = re.findall(r"\b\w+\b", body_for_count)
+        word_count = len(words)
+
+        if "## " not in content and "# " not in content:
+            raise RuntimeError("Writing output has no H1/H2 markdown headings")
+
+        return {
+            "content_md": content,
+            "word_count": word_count,
+        }
+
+    # ────────────────────────────────────────────────────────────────
+    # Security-cameras niche branch (quvii)
+    # ────────────────────────────────────────────────────────────────
+    def _execute_security_cameras(self, input_data: dict[str, Any]) -> dict[str, Any]:
+        keyword = input_data["keyword"]
+        article_type = input_data["article_type"]
+        outline = input_data["outline"]
+        min_words = int(input_data.get("min_word_count", 1200))
+        max_words = int(input_data.get("max_word_count", 2200))
+        feedback = input_data.get("qa_feedback")
+
+        # SC factual rules are static (coherent US-consumer audience).
+        rules = SC_FACTUAL_RULES
+
+        feedback_block = ""
+        if feedback:
+            banned = feedback.get("fabricated_terms") or []
+            ban_section = ""
+            if banned:
+                bullet = "\n".join(f"   - {t}" for t in banned)
+                ban_section = (
+                    "\nBANNED CLAIMS — these did NOT verify in search last "
+                    "time. Do NOT repeat them. Write "
+                    "'[information unavailable]' or omit:\n" + bullet + "\n"
+                )
+            feedback_block = (
+                "PREVIOUS ATTEMPT FAILED QA. Address these issues in this "
+                f"rewrite:\n{json.dumps(feedback, indent=2, ensure_ascii=False)}\n"
+                + ban_section
+            )
+
+        site_host = (
+            self.site_config.get("domain")
+            or self.site_config.get("site_url")
+            or "quvii.com"
+        )
+        prompt = SC_WRITING_PROMPT.format(
+            factual_rules=rules,
+            keyword=keyword,
+            article_type=article_type,
+            min_words=min_words,
+            max_words=max_words,
+            outline_json=json.dumps(outline, indent=2, ensure_ascii=False),
+            feedback_block=feedback_block,
+            site_host=site_host,
         )
 
         resp = self._call_llm(
