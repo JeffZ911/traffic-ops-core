@@ -38,7 +38,7 @@ env:
 jobs:
   pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 75
 
     steps:
       - name: Checkout traffic-ops-core
@@ -216,6 +216,7 @@ jobs:
         run: pip install --quiet Pillow
 
       - name: Generate hero + 6 inline images for the NEW article
+        timeout-minutes: 25
         if: steps.budget.outputs.action != 'pause_all'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -229,6 +230,7 @@ jobs:
       # ---------------------------------------------------------------- 5b.
       # Backfill the OLDEST article that has fewer than 4 inline images.
       - name: Backfill 1 under-imaged article
+        timeout-minutes: 10
         if: steps.budget.outputs.action == 'normal' || steps.budget.outputs.action == 'warn'
         continue-on-error: true
         env:
@@ -243,6 +245,7 @@ jobs:
       # ---------------------------------------------------------------- 5c.
       # GSC feedback loop: rewrite ONE page-2 article per day.
       - name: Rewrite 1 page-2 article (GSC feedback loop)
+        timeout-minutes: 10
         if: steps.budget.outputs.action == 'normal' || steps.budget.outputs.action == 'warn'
         continue-on-error: true
         env:
