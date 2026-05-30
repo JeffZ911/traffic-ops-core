@@ -71,6 +71,19 @@ for fabricated proper nouns):
   When information is sparse — say so. When a number is uncertain — write
   "[exact value pending official confirmation]". The reader trusts you
   MORE when you're honest about gaps.
+
+HIGH-RISK FABRICATION CATEGORIES (these are what the QA gate catches most
+— a single invented one auto-fails the WHOLE article on factual_accuracy):
+  • Banner / gacha-pool names      • Event / tournament names
+  • Location / region / zone names • Character, weapon, Arc, skill names
+  • Version numbers + patch dates  • Specific percentages / stat values
+For EVERY one of these you are about to name: if it did not appear
+verbatim in a source you actually retrieved this session, DO NOT name it.
+Use a generic description instead ("the latest banner", "a recent limited
+event", "an endgame zone", "her ultimate skill", "the current patch").
+A generic phrase always beats an invented proper noun. Spelling counts —
+a misspelled real name (e.g. "Nautily" for "Nautili") is also scored as
+a fabrication, so if you are not 100% sure of the spelling, go generic.
 """
 
 

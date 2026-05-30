@@ -199,7 +199,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: python -m scripts.run_batch_smoke --count 3 --max-retries 1
+        run: python -m scripts.run_batch_smoke --count 3 --max-retries 2
 
       # ---------------------------------------------------------------- 4.
       - name: Publish article markdown to pixelmatch-site

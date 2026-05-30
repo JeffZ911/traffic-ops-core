@@ -41,6 +41,72 @@ def _slugify(text: str, max_len: int = 60) -> str:
 SLUG_COLLISION_MAX_RETRIES = 3
 
 
+# Dimension keys the QA agent scores (besides factual_accuracy).
+_QA_SOFT_DIMS = ("seo", "structure", "ai_pattern", "info_density", "intent_match")
+
+
+def _is_factual_only_failure(feedback: dict) -> list[str]:
+    """A QA fail is 'surgically rescuable' when EVERY soft dimension is
+    strong (>=1.5/2) and the ONLY thing that sank it is a fabricated
+    proper noun (factual_accuracy low) WITH the offending terms named.
+    Returns the fabricated-terms list when rescuable, else []."""
+    if not isinstance(feedback, dict):
+        return []
+    terms = [t for t in (feedback.get("fabricated_terms") or []) if isinstance(t, str) and t.strip()]
+    if not terms:
+        return []
+    softs = [feedback.get(k) for k in _QA_SOFT_DIMS]
+    if any(s is None for s in softs):
+        return []
+    if min(float(s) for s in softs) < 1.5:
+        return []  # something else is also weak — not a clean factual-only miss
+    return terms
+
+
+def _surgical_defab(llm, model: str, content_md: str, terms: list[str]) -> str | None:
+    """Surgically remove fabricated terms from an OTHERWISE-PERFECT article
+    instead of regenerating it wholesale (a full regen often invents a NEW
+    fabrication and fails again). The edit touches ONLY sentences containing
+    the flagged terms — it cannot introduce new fabrications elsewhere
+    because it is forbidden to add any new specific claims.
+
+    Returns the edited markdown, or None on failure."""
+    bullet = "\n".join(f"  - {t}" for t in terms)
+    prompt = (
+        "You are a careful copy editor. Below is a Markdown article that is "
+        "excellent EXCEPT it contains a few fabricated/unverifiable specific "
+        "names. Your ONLY job: neutralize those exact terms.\n\n"
+        "FABRICATED TERMS TO FIX:\n" + bullet + "\n\n"
+        "RULES:\n"
+        "1. For each fabricated term, either (a) replace it with a correct "
+        "GENERIC description (e.g. a fabricated banner name → 'the current "
+        "banner'; a fabricated event → 'a recent in-game event'), or (b) if "
+        "the whole sentence only exists to assert that fabricated specific, "
+        "delete that sentence.\n"
+        "2. Change NOTHING else. Do not reword unaffected sentences. Do not "
+        "add ANY new specific names, numbers, dates, or claims — that would "
+        "just create a new fabrication. Generic is correct here.\n"
+        "3. Keep all Markdown structure (headings, tables, the Sources "
+        "section, inline links) intact.\n"
+        "4. Return the FULL edited article in Markdown — body only, no "
+        "preamble, no fences.\n\n"
+        "ARTICLE:\n" + content_md
+    )
+    try:
+        resp = llm.generate(
+            prompt=prompt, model=model, max_tokens=12000,
+            temperature=0.2, json_mode=False, enable_search=False,
+        )
+        out = (resp.text or "").strip()
+        # Sanity: a real edit keeps most of the article. Reject a degenerate
+        # response (model returned a stub) so we never publish a gutted page.
+        if len(out) < 0.6 * len(content_md) or "## " not in out and "# " not in out:
+            return None
+        return out
+    except Exception:
+        return None
+
+
 def _date_suffix() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d")
 
@@ -358,6 +424,7 @@ def run_one_article(
         qa_attempts = 0
         final_qa: Optional[dict[str, Any]] = None
         write_output: Optional[dict[str, Any]] = None
+        surgical_tried = False
 
         while True:
             log(f"\n=== Step 3: WritingAgent (attempt {qa_attempts + 1}) ===")
@@ -420,6 +487,49 @@ def run_one_article(
                 summary["content_md"] = write_output["content_md"]
                 summary["word_count"] = wc
                 return summary
+
+            # ---- SURGICAL RESCUE (2026-05-30) ----
+            # If the article is strong on every soft dimension and the ONLY
+            # thing that failed it is a named fabricated proper noun, don't
+            # burn a full-regen retry (which often invents a fresh
+            # fabrication). Edit out just those terms and re-score once.
+            fb_now = qa_result.get("feedback") or {}
+            rescuable = _is_factual_only_failure(fb_now)
+            if rescuable and not surgical_tried:
+                surgical_tried = True
+                log(f"  ⚕️  Surgical rescue: 5-dim strong, removing fabricated "
+                    f"terms {rescuable}")
+                model = writer.get_model()
+                fixed = _surgical_defab(llm, model, write_output["content_md"], rescuable)
+                if fixed:
+                    write_output["content_md"] = fixed
+                    write_output["word_count"] = len(re.findall(r"\b\w+\b",
+                        re.split(r"\n##\s*Sources\s*\n", fixed, maxsplit=1)[0]))
+                    _set_article(article_id, content_md=fixed,
+                                 word_count=write_output["word_count"], status="qa_pending")
+                    qa2 = QAAgent(llm=llm, site_config=site_config).run(
+                        site_id=site_id, article_id=article_id,
+                        input_data={
+                            "keyword": keyword, "article_type": article_type,
+                            "content_md": fixed, "outline": outline, "game": game,
+                            "word_count": write_output["word_count"],
+                            "min_word_count": min_words, "max_word_count": max_words,
+                        },
+                    )
+                    s2 = float(qa2["score"]); p2 = bool(qa2["passed"])
+                    log(f"  ⚕️  post-surgery QA score={s2} passed={p2}")
+                    _set_article(article_id, qa_score=s2, qa_feedback=qa2.get("feedback"))
+                    if p2:
+                        _set_article(article_id, status="qa_passed")
+                        _set_keyword_status(keyword_id, "completed")
+                        summary["final_status"] = "qa_passed"
+                        summary["qa"] = qa2
+                        summary["content_md"] = fixed
+                        summary["word_count"] = write_output["word_count"]
+                        summary["rescued"] = True
+                        return summary
+                    # surgery didn't clear the bar — fall through to normal retry
+                    qa_result = qa2
 
             qa_attempts += 1
             feedback = qa_result.get("feedback")
