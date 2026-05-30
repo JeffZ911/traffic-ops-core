@@ -19,12 +19,14 @@ name: Content Pipeline (pixelmatch.art)
 
 on:
   schedule:
+    # Cut 6→2/day (2026-05-30). The funnel is index-gated, not
+    # content-gated: Google returns 'Discovered - currently not indexed'
+    # for the existing corpus, so high-frequency publishing only burns
+    # budget + reinforces the content-farm signal. 03:00 UTC kept (the
+    # GSC request-indexing worklist is hour-guarded to it) + one
+    # afternoon slot for a retry.
     - cron: '0 3 * * *'
-    - cron: '0 7 * * *'
-    - cron: '0 11 * * *'
     - cron: '0 15 * * *'
-    - cron: '0 19 * * *'
-    - cron: '0 23 * * *'
   workflow_dispatch:
 
 concurrency:
