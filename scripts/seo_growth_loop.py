@@ -243,17 +243,120 @@ def _trend(domain, days=14):
         }
 
 
-def _authority_done_count(domain, days=14):
+def _authority_stats(domain):
+    """PERCEIVED action — not guessed. Reads the operator's actual 'done'
+    clicks on authority cards: how many in the last 14d, how many total
+    ever, and how many weeks since the FIRST one (= how long the campaign
+    has actually been running, which decides whether flat traffic is
+    'still in the lag window' vs 'something is wrong')."""
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            select count(*) from ops_tasks
-             where site_domain=%s and category='authority'
-               and status='done' and completed_at >= now() - (%s||' days')::interval
+            select
+              count(*) filter (where completed_at >= now() - interval '14 days') recent,
+              count(*) total,
+              min(completed_at) first_done
+            from ops_tasks
+            where site_domain=%s and category='authority' and status='done'
             """,
-            (domain, days),
+            (domain,),
         )
-        return int(cur.fetchone()[0])
+        recent, total, first = cur.fetchone()
+        weeks = 0.0
+        if first:
+            cur.execute("select extract(epoch from (now()-%s))/604800.0", (first,))
+            weeks = float(cur.fetchone()[0])
+        return {"recent": int(recent or 0), "total": int(total or 0),
+                "weeks_running": round(weeks, 1)}
+
+
+def _latest_index_ratio(domain):
+    """Latest indexed-ratio sample (are the pages actually in the index
+    yet?). Feeds the diagnosis: links can't help rank a page that still
+    isn't indexed."""
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            select (payload->'indexing_coverage'->>'ratio')::float
+              from metrics_raw
+             where site_id=(select id from sites where domain=%s)
+               and source='gsc' and payload ? 'indexing_coverage'
+             order by metric_date desc limit 1
+            """,
+            (domain,),
+        )
+        r = cur.fetchone()
+        return float(r[0]) if r and r[0] is not None else None
+
+
+def _diagnose_flat(domain, stats, idx_ratio):
+    """The operator DID the work (stats.total>0) and enough time has passed
+    (weeks_running >= 4) but traffic is still flat. Don't say 'keep
+    waiting' — produce a ranked, specific diagnosis of WHY, each with a
+    concrete check the operator (or AI) can run next."""
+    weeks = stats["weeks_running"]
+    lines = [
+        f"⚠️ DIAGNOSIS — you've completed {stats['total']} authority task(s) "
+        f"over {weeks:.0f} weeks and traffic is still flat. Past the 4-8wk "
+        f"backlink-lag window, so this is NOT just lag. Likeliest causes, "
+        f"ranked — work top-down:",
+        "",
+    ]
+    # 1. Are pages even indexed? Links can't rank an unindexed page.
+    if idx_ratio is None or idx_ratio < 0.05:
+        lines.append(
+            "1) PAGES STILL NOT INDEXED (most likely). Indexed ratio is "
+            f"{'unknown' if idx_ratio is None else f'{idx_ratio:.0%}'}. If "
+            "Google still won't index, the backlinks aren't being COUNTED "
+            "yet — either too few, or from pages Google itself hasn't "
+            "indexed (a link only passes authority once the linking page "
+            "is indexed). CHECK: in GSC URL-inspect 2 pages you built links "
+            "to — indexed? And are your backlink SOURCES (the Reddit/forum/"
+            "directory pages) themselves indexed? An unindexed source = a "
+            "link worth ~nothing."
+        )
+    else:
+        lines.append(
+            f"1) Pages ARE indexed ({idx_ratio:.0%}) but not ranking → the "
+            "problem moved downstream to ranking, not indexing. Good — that's "
+            "progress. Focus shifts to keyword difficulty (below)."
+        )
+    # 2. Link quality
+    lines.append(
+        "2) LINK QUALITY, not quantity. 5 forum/profile links (often "
+        "nofollow) move nothing; 1 editorial dofollow link from a real site "
+        "in-niche moves a lot. CHECK: of the links you built, how many are "
+        "(a) dofollow and (b) on a topically-relevant, already-indexed page? "
+        "If the honest answer is 0, that's the gap — prioritise the Outreach "
+        "card (a real site mention) over more community comments."
+    )
+    # 3. Keyword difficulty
+    lines.append(
+        "3) KEYWORD DIFFICULTY too high for current authority. A 3-week-old "
+        "domain cannot rank head terms owned by DA-70+ incumbents, no matter "
+        "the content. CHECK: are your target keywords long-tail + low-"
+        "competition (4-6 word buyer questions), or broad head terms? If "
+        "broad, the content pool needs to pivot to ultra-specific long-tail "
+        "first — those rank on thin authority and build the base."
+    )
+    # 4. Intent / SERP match
+    lines.append(
+        "4) SEARCH-INTENT MISMATCH. CHECK: Google one target keyword "
+        "incognito — are page-1 results the SAME FORMAT as your article "
+        "(listicle vs guide vs tool vs video)? If Google ranks calculators "
+        "and you wrote prose, you can't win that SERP regardless of links."
+    )
+    # 5. Time/escalation
+    if weeks >= 8:
+        lines.append(
+            "5) 8+ WEEKS, real effort, still flat → make a CALL: either the "
+            "niche is too saturated for this domain's runway, or the link "
+            "work isn't landing real editorial links. Consider a focused "
+            "1-2 week digital-PR push (one genuinely linkable data asset + "
+            "10 targeted outreach emails) as a decisive test before "
+            "committing more months."
+        )
+    return "\n".join(lines)
 
 
 def gen_review(domain, niche, today, dry_run):
@@ -262,7 +365,8 @@ def gen_review(domain, niche, today, dry_run):
     t = _trend(domain, 14)
     if t is None:
         return
-    done = _authority_done_count(domain, 14)
+    stats = _authority_stats(domain)
+    idx_ratio = _latest_index_ratio(domain)
 
     def arrow(recent, prior):
         if recent > prior: return f"↑ {prior}→{recent}"
@@ -271,51 +375,59 @@ def gen_review(domain, niche, today, dry_run):
 
     impr = arrow(t["impr_recent"], t["impr_prior"])
     sess = arrow(t["sess_recent"], t["sess_prior"])
+    moved_up = t["impr_recent"] > t["impr_prior"] or t["sess_recent"] > t["sess_prior"]
+    flat = (t["impr_recent"] == t["impr_prior"] and t["sess_recent"] == t["sess_prior"])
 
-    # Narrative: connect the manual work to the outcome honestly, with the
-    # 4-8 week backlink lag caveat so flat results aren't misread as failure.
-    if t["impr_recent"] == 0 and t["impr_prior"] == 0:
+    # Branch on PERCEIVED effort × elapsed time × outcome. The 'done' count
+    # is the operator's actual button-clicks (ground truth they DID it),
+    # never inferred from traffic.
+    if stats["total"] == 0:
+        priority = "high"
         verdict = (
-            "Still 0 GSC impressions. This is the authority wall, not a "
-            "content problem. Backlinks take 4-8 weeks to move indexing — "
-            f"you completed {done} authority task(s) in the last 2 weeks; "
-            "keep the cadence, the signal lags the work."
-            if done else
-            "Still 0 GSC impressions AND 0 authority tasks completed in 2 "
-            "weeks. Nothing is pushing on the bottleneck. Do at least the "
-            "Community + Outreach cards this week — content alone will not "
-            "break the index wall."
+            "No authority tasks marked done yet. Nothing is pushing on the "
+            "real bottleneck. Traffic CANNOT move from content alone here — "
+            "do this week's Community + Outreach cards. (This isn't a guess "
+            "from traffic; it's that the off-page work simply hasn't started.)"
         )
-    elif t["impr_recent"] > t["impr_prior"]:
+    elif moved_up:
+        priority = "normal"
         verdict = (
-            f"Impressions moving UP ({impr}) — early authority traction. "
-            f"{done} authority task(s) done in 2 weeks is correlating. "
-            "Double down on whichever route you actually did."
+            f"WORKING. You've done {stats['total']} authority task(s) over "
+            f"{stats['weeks_running']:.0f} weeks and the funnel moved: "
+            f"impressions {impr}, sessions {sess}. The off-page work is "
+            "landing — double down on whichever route you actually did."
+        )
+    elif stats["weeks_running"] < 4:
+        priority = "normal"
+        verdict = (
+            f"You've done {stats['total']} authority task(s), campaign is "
+            f"{stats['weeks_running']:.0f} weeks old. Traffic flat — but "
+            "backlink→ranking lag is 4-8 weeks, so this is EXPECTED this "
+            "early, not a failure. Keep the weekly cadence; the real read "
+            "is at week 4-6."
         )
     else:
-        verdict = (
-            f"Impressions {impr}. Mixed. Keep the weekly authority cadence; "
-            "review again next week."
-        )
+        # Did real work, enough time elapsed, STILL flat → DIAGNOSE WHY.
+        priority = "high"
+        verdict = _diagnose_flat(domain, stats, idx_ratio)
 
     title = f"[Funnel review] {domain} — {wk}"
     detail = (
         f"2-WEEK FUNNEL MOVEMENT ({domain}):\n"
-        f"  GSC impressions: {impr}\n"
-        f"  GSC clicks (recent): {t['clk_recent']}\n"
-        f"  GA4 sessions: {sess}\n"
-        f"  Authority tasks completed (last 14d): {done}\n\n"
-        f"VERDICT: {verdict}\n\n"
-        f"This card is the retrospective: it ties the manual work you did "
-        f"to what actually moved. If impressions stay 0 for 30+ days with "
-        f"authority work happening, escalate (reconsider niche competition "
-        f"or go harder on outreach)."
+        f"  GSC impressions: {impr}   clicks(recent): {t['clk_recent']}\n"
+        f"  GA4 sessions:    {sess}\n"
+        f"  Index ratio:     {'unknown' if idx_ratio is None else f'{idx_ratio:.0%}'}\n"
+        f"  Authority tasks DONE — last 14d: {stats['recent']}, "
+        f"total: {stats['total']}, campaign age: {stats['weeks_running']:.0f}wk\n\n"
+        f"{verdict}\n\n"
+        f"(Action counts above are your actual 'done' clicks — perceived, "
+        f"not inferred from traffic.)"
     )
     if dry_run:
-        print(f"  [DRY] would upsert: {title}")
-        print("       " + verdict)
+        print(f"  [DRY] would upsert: {title}  [{priority}]")
+        print("       " + verdict.split(chr(10))[0])
     else:
-        res = upsert_open_task(title, detail, priority="normal",
+        res = upsert_open_task(title, detail, priority=priority,
                                category="seo-review", site_domain=domain)
         print(f"  {res}: {title}")
 
