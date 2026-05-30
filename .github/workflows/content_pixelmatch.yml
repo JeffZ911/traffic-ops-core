@@ -386,6 +386,21 @@ jobs:
           GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
         run: python -m scripts.ops_autoflag --site pixelmatch.art
 
+      # ---------------------------------------------------------------- 7e2.
+      # SEO growth loop → ops_tasks: weekly AUTHORITY worklist (community /
+      # linkable-asset / outreach, niche-aware, references real articles)
+      # + a 2-week FUNNEL REVIEW card that ties the manual off-page work to
+      # actual GSC/GA4 movement (the retrospective loop). Idempotent
+      # (week-stamped titles); safe to run every cron. Authority is the
+      # real bottleneck past the index wall — this is the human worklist.
+      - name: SEO growth loop (authority + funnel review)
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: python -m scripts.seo_growth_loop --site pixelmatch.art
+
       # ---------------------------------------------------------------- 7f.
       - name: Daily GSC request-indexing worklist
         continue-on-error: true

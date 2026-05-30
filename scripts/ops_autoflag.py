@@ -177,16 +177,63 @@ def check_indexing_stagnation(domain: str) -> None:
         resolve_open_task(title, site_domain=domain)
         return
 
+    # STAGED ESCALATION (2026-05-30). A flat "still 0%" card gave the same
+    # advice forever and bottomed out at "it may just need more time". But
+    # the cause CHANGES with site age: early on it really is just crawl
+    # lag; past a month with content flowing, the blocker is unambiguously
+    # AUTHORITY, and the right action is off-page work (see the
+    # [Authority · …] cards from seo_growth_loop), not more diagnosing.
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select current_date - min(created_at)::date from articles "
+            "where site_id = (select id from sites where domain=%s)",
+            (domain,),
+        )
+        row = cur.fetchone()
+    age_days = int(row[0]) if row and row[0] is not None else 0
+
+    base = (
+        f"{len(days)} days of indexing samples since {first_day}, latest "
+        f"still {latest_ratio:.0%} indexed. Site age: {age_days}d.\n"
+    )
+    if age_days < 14:
+        priority = "normal"
+        body = (
+            "STAGE 1 (young domain, <14d) — likely just crawl lag, NOT "
+            "broken. ACTION: in GSC, URL-inspect your 5 best articles + "
+            "click 'Request indexing' for each. Confirm sitemap is "
+            "submitted + downloaded with no errors. Then wait — Google "
+            "rations crawl budget for new domains."
+        )
+    elif age_days <= 30:
+        priority = "high"
+        body = (
+            "STAGE 2 (14-30d, still 0%) — crawl lag alone no longer "
+            "explains this. Google has likely marked the corpus "
+            "'Discovered – currently not indexed': a low-authority signal. "
+            "ACTION: stop waiting, start EARNING authority. Do this week's "
+            "[Authority · Community] + [Authority · Outreach] cards — the "
+            "first few real backlinks are what unlock crawl budget. Also "
+            "verify a 'Live test' passes in URL Inspection (rules out a "
+            "technical block)."
+        )
+    else:
+        priority = "high"
+        body = (
+            "STAGE 3 (30+ days, still 0%) — RED. This is the authority wall, "
+            "full stop. More content makes it WORSE (content-farm signal). "
+            "ACTION: (1) sustain the weekly authority cadence — community "
+            "answers, linkable assets, outreach; (2) consider concentrating "
+            "internal links onto 5-10 pillar pages instead of spreading thin; "
+            "(3) if a competitor audit shows the niche is saturated by "
+            "high-DA incumbents, this domain may need a longer authority "
+            "runway than planned — set expectations accordingly. Check the "
+            "[Funnel review] card for the action→outcome trend."
+        )
+
     upsert_open_task(
-        title,
-        f"sitemap 修复可能没生效, 需诊断 — {len(days)} days of indexing "
-        f"samples since {first_day}, latest still {latest_ratio:.0%} indexed.\n"
-        f"HOW: 1) GSC → Pages report: are URLs 'Discovered – not indexed' or "
-        f"'Crawled – not indexed'? 2) Re-run sitemap resubmit + confirm GSC "
-        f"shows the new URL count. 3) urlInspection a known-good URL — does "
-        f"'Live test' pass? 4) Check robots.txt / canonical aren't blocking. "
-        f"5) If all clean, it may just need more time (young domain).",
-        priority="high", category="seo", site_domain=domain,
+        title, base + body,
+        priority=priority, category="seo", site_domain=domain,
     )
 
 
