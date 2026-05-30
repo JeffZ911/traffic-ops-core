@@ -194,6 +194,21 @@ jobs:
             echo "skip — trend scan runs once/day at 03:00 UTC (now $(date -u +%H):00)"
           fi
 
+      # ---------------------------------------------------------------- 2b.
+      # Estimate keyword competition (LLM, free) → keywords.competition.
+      # A zero-authority site can only rank LOW-competition long-tail; this
+      # lets KeywordSelector prefer the rankable sweet spot over unwinnable
+      # head terms. Idempotent (only scores competition IS NULL).
+      - name: Score keyword competition
+        if: steps.budget.outputs.action != 'pause_all'
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.QUVII_GEMINI_API_KEY }}
+        run: python -m scripts.keyword_difficulty --site quvii.com --limit 80
+
       # ---------------------------------------------------------------- 3.
       # Article generation — slow-start: 3 articles per cron × 2 crons/day
       # = ~6 articles/day. Bump to batch=4 + 24 cron/day when ramping.

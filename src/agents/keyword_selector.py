@@ -46,6 +46,16 @@ ALL_TYPES: tuple[str, ...] = (
 
 GSC_LONGTAIL_BONUS = 20.0
 
+# Competition-aware bias (LLM-estimated keywords.competition ∈ [0,1]).
+# Magnitudes sit between the type-rate rewards (±50/80) and the trend
+# bonus so competition nudges ordering without overriding a proven
+# high-pass-rate type. A zero-authority site can only rank low-comp
+# long-tail, so the reward/penalty gap is deliberately wide.
+COMP_LOW_REWARD = 40.0      # competition ≤ 0.30 → rankable long-tail
+COMP_MID_REWARD = 5.0       # 0.30 < c < 0.70
+COMP_HIGH_PENALTY = -60.0   # competition ≥ 0.70 → unwinnable head term
+COMP_VOLUME_BONUS = 10.0    # volume band ≥ 2 (real demand) on top of above
+
 
 def _trend_freshness_bonus(source: str | None, age_days: float | None) -> float:
     """Trend-jacking: source='trend' keywords get a big bonus that DECAYS so
@@ -114,6 +124,13 @@ Allowed article_types: {allowed_types}.
 Rules:
 - Prefer high `priority_with_bonus` keywords. The adjustments already
   encode our track record — high score = type we ship well + GSC signal.
+- COMPETITION: this is a young, low-authority site — it can only rank
+  LOW-competition long-tail. When `competition` is present, strongly
+  prefer candidates with competition ≤ 0.3 (rankable) and AVOID
+  competition ≥ 0.7 (head terms incumbents own — we cannot win them yet),
+  unless the long-tail pool is exhausted. `volume_band` ≥ 2 means real
+  demand — prefer rankable keywords that also have demand. (This is
+  already folded into priority_with_bonus, but weigh it consciously.)
 - Map intent to article_type: list-intent → tier_list; how-to → build /
   boss_guide / reroll; informational → character_db / faq; side-by-side
   → comparison. Avoid news / weapon-tier-list-style keywords entirely
@@ -336,7 +353,8 @@ class KeywordSelectorAgent(BaseAgent):
             cur.execute(
                 """
                 select id, keyword, intent, priority_score, source, notes,
-                       extract(epoch from (now() - created_at))/86400.0 as age_days
+                       extract(epoch from (now() - created_at))/86400.0 as age_days,
+                       competition, search_volume
                   from keywords
                  where site_id = %s
                    and status = 'planned'
@@ -421,7 +439,7 @@ class KeywordSelectorAgent(BaseAgent):
                 return None
 
             candidates: list[dict[str, Any]] = []
-            for kid, kw, intent, pri, src, notes, age_days in cand_rows:
+            for kid, kw, intent, pri, src, notes, age_days, competition, sv in cand_rows:
                 game_slug = _game_from_notes(notes)
                 # Per-game blacklist (preferred) else fall back to the flat one.
                 effective_blacklist = (
@@ -442,6 +460,19 @@ class KeywordSelectorAgent(BaseAgent):
                 game_weight = float(game_priorities.get(game_slug, 0.0)) if game_slug else 0.0
                 game_bonus = round(game_weight * GAME_PRIORITY_WEIGHT, 2)
                 trend_bonus = _trend_freshness_bonus(src, age_days)
+                # Competition-aware bias (2026-05-30). A zero-authority site
+                # can only realistically rank LOW-competition long-tail. Boost
+                # those; penalise head terms it can't win. Volume nudges so we
+                # don't favour zero-demand keywords. Neutral when unscored
+                # (competition IS NULL) so it never blocks selection.
+                comp_bonus = 0.0
+                if competition is not None:
+                    c = float(competition)
+                    if c <= 0.3:      comp_bonus = COMP_LOW_REWARD      # rankable long-tail
+                    elif c >= 0.7:    comp_bonus = COMP_HIGH_PENALTY    # unwinnable head term
+                    else:             comp_bonus = COMP_MID_REWARD
+                    if sv and int(sv) >= 2:  # has real demand
+                        comp_bonus += COMP_VOLUME_BONUS
                 candidates.append({
                     "keyword_id": str(kid),
                     "keyword": kw,
@@ -455,8 +486,11 @@ class KeywordSelectorAgent(BaseAgent):
                     "game_bonus": game_bonus,
                     "game_weight": game_weight,
                     "trend_bonus": trend_bonus,
+                    "competition": round(float(competition), 2) if competition is not None else None,
+                    "volume_band": int(sv) if sv else None,
+                    "competition_bonus": comp_bonus,
                     "priority_with_bonus": round(
-                        base + gsc_bonus + type_bonus + game_bonus + trend_bonus, 2
+                        base + gsc_bonus + type_bonus + game_bonus + trend_bonus + comp_bonus, 2
                     ),
                 })
             if not candidates:
