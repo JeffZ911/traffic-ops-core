@@ -325,7 +325,26 @@ class QAAgent(BaseAgent):
         # then auto-noindex'd (qa_score < 6.0 prune), i.e. pure wasted spend.
         # Aligning the publish gate with the index gate at 6.0 means we never
         # generate-and-bury: strong/reject don't publish at all. Quality-first.
-        passed = tier in ("clean", "note")
+        #
+        # QUALITY-GATE SWITCH (2026-05-30, operator-toggled). When
+        # sites.config.qa_thresholds.quality_gate_enabled == false, the
+        # SCORE-based gate is bypassed: an article publishes regardless of
+        # how low its quality score is — EXCEPT the fabrication hard-gate
+        # (factual_accuracy=0 with fabricated terms) ALWAYS holds, because
+        # publishing false content is what gets a new site buried by
+        # Google's Helpful-Content system. So the switch trades "quality
+        # floor" for "less waste / more pages", while keeping the
+        # don't-publish-lies protection that guards indexing.
+        quality_gate = bool(
+            self.site_config.get("qa_thresholds", {}).get("quality_gate_enabled", True)
+        )
+        is_fabrication_reject = bool(feedback.get("_hard_fail"))
+        if quality_gate:
+            passed = tier in ("clean", "note")
+        else:
+            # Gate off: publish everything that is NOT fabricated.
+            passed = not is_fabrication_reject
+            feedback["_quality_gate"] = "OFF (publishing non-fabricated regardless of score)"
 
         return {
             "score": score,
