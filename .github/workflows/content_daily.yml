@@ -6,14 +6,18 @@ name: Content Daily Pipeline
 # kept because the daily GSC request-indexing worklist is hour-guarded to it.
 on:
   schedule:
-    # Cut 6→2/day (2026-05-30). The funnel is index-gated, not
-    # content-gated: Google returns 'Discovered - currently not indexed'
-    # for the existing corpus, so high-frequency publishing only burns
-    # budget + reinforces the content-farm signal. 03:00 UTC kept (the
-    # GSC request-indexing worklist is hour-guarded to it) + one
-    # afternoon slot for a retry.
+    # Reverted 2→6/day (2026-05-31). With 2/day, GSC impressions started
+    # falling AND the per-cron 'Backfill under-imaged article' step (runs
+    # once/cron) fell 3x behind, leaving new articles without hero images
+    # (black placeholders). 6/day restores generation throughput, image
+    # backfill cadence, and indexing-ping frequency. The daily cap still
+    # bounds article count; extra crons are throughput + retry headroom.
     - cron: '0 3 * * *'
+    - cron: '0 7 * * *'
+    - cron: '0 11 * * *'
     - cron: '0 15 * * *'
+    - cron: '0 19 * * *'
+    - cron: '0 23 * * *'
   workflow_dispatch:
 
 # Cancel an in-flight run if a newer one starts
