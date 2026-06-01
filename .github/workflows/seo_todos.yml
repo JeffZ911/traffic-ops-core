@@ -1,0 +1,62 @@
+name: SEO Todos (daily worklist refresh)
+# Decoupled from content generation ON PURPOSE. The authority wall — not
+# article volume — is the bottleneck (see INDEXING_WORKLIST.md / the
+# indexing census), so the daily human worklist must keep refreshing even
+# on days we throttle or stop writing articles.
+#
+# Runs ONLY the two worklist scripts, for all 3 sites, writing idempotent
+# (upsert_open_task) cards into ops_tasks → dashboard /todos:
+#   1. seo_growth_loop  --mode authority  → "authority" cards (link-building)
+#   2. daily_indexing_worklist            → "seo-reqidx" cards (GSC Request-Indexing)
+#
+# No site-repo checkout (both scripts read/write the DB only). No article
+# generation, no deploys. Safe to run every day.
+
+on:
+  schedule:
+    - cron: '30 4 * * *'   # 04:30 UTC — after the 03:00 content crons settle
+  workflow_dispatch:
+
+concurrency:
+  group: seo-todos
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        site: [ntecodex.com, pixelmatch.art, quvii.com]
+    steps:
+      - name: Checkout traffic-ops-core
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Python deps
+        run: pip install -e .
+
+      - name: Authority + funnel-review worklist
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+        run: python -m scripts.seo_growth_loop --site ${{ matrix.site }} --mode authority
+
+      - name: Daily GSC Request-Indexing worklist
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+        run: python -m scripts.daily_indexing_worklist --site ${{ matrix.site }} --max-inspect 40

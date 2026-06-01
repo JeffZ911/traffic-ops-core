@@ -1,0 +1,68 @@
+name: Indexing Census (lift tracker)
+# Quantifies whether Request-Indexing + link-building actually move the
+# needle. Samples each site's live sitemap, runs read-only GSC
+# urlInspection, tallies coverageState, and diffs the indexed-% against the
+# committed baseline (data/indexing_baseline.json, taken 2026-06-01).
+#
+# Cadence: every 2 weeks (the realistic timescale for indexing/authority to
+# respond) + on-demand via workflow_dispatch. Each run commits a dated
+# snapshot to data/ so the lift trend is version-controlled.
+
+on:
+  schedule:
+    - cron: '0 6 1,15 * *'   # 06:00 UTC on the 1st and 15th — ~bi-weekly
+  workflow_dispatch:
+    inputs:
+      set_baseline:
+        description: 'Overwrite the baseline with this run (use only to re-anchor)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: indexing-census
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # commit the dated snapshot back to the repo
+
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout traffic-ops-core
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Python deps
+        run: pip install -e .
+
+      - name: Run census + diff vs baseline
+        env:
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+        run: |
+          STAMP=$(date -u +%Y-%m-%d)
+          BASELINE_FLAG=""
+          if [ "${{ github.event.inputs.set_baseline }}" = "true" ]; then
+            BASELINE_FLAG="--baseline"
+          fi
+          CENSUS_DATE=$STAMP python -m scripts.indexing_census \
+            --per-site 40 --compare data/indexing_baseline.json $BASELINE_FLAG \
+            | tee /tmp/census.log
+
+      - name: Commit snapshot
+        run: |
+          git config user.name "${{ secrets.GIT_USER_NAME }}"
+          git config user.email "${{ secrets.GIT_USER_EMAIL }}"
+          git add data/indexing_census_*.json data/indexing_baseline.json 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m "data: indexing census snapshot $(date -u +%Y-%m-%d) [skip ci]"
+            git push
+          else
+            echo "no snapshot changes to commit"
+          fi
