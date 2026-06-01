@@ -1,0 +1,74 @@
+name: Fix quvii-site production branch (one-off)
+
+# ONE-OFF infra fix. The quvii-site Cloudflare Pages project was created
+# with a production branch != "main", so every `wrangler pages deploy
+# --branch main` landed as a PREVIEW deployment and the custom domain
+# quvii.com stayed pinned to an old production deployment. This caused
+# quvii.com/sitemap.xml, /learn/, /blog/, /about/ to 404 and the brand
+# VI never went live, even though every deploy "succeeded".
+#
+# This workflow:
+#   1. Reads the current production_branch via CF API (logs it).
+#   2. PATCHes production_branch -> "main" (matches ntecodex /
+#      pixelmatch-blog projects).
+#   3. Re-reads to confirm.
+#   4. Builds + deploys to --branch main, which is now PRODUCTION, so
+#      the deployment is promoted to quvii.com.
+#
+# Safe to re-run (idempotent). After this lands, deploy_quvii_only.yml
+# and content_quvii.yml deploys will reach production normally.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Set production branch -> main via Cloudflare API
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/quvii-site"
+          echo "::group::Before"
+          curl -sf -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$API" \
+            | python3 -c "import sys,json;d=json.load(sys.stdin)['result'];print('production_branch =',d.get('production_branch'));print('subdomain        =',d.get('subdomain'))"
+          echo "::endgroup::"
+
+          echo "Patching production_branch -> main ..."
+          curl -sf -X PATCH -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data '{"production_branch":"main"}' "$API" \
+            | python3 -c "import sys,json;d=json.load(sys.stdin);print('success =',d.get('success'),'| errors =',d.get('errors'))"
+
+          echo "::group::After"
+          curl -sf -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$API" \
+            | python3 -c "import sys,json;d=json.load(sys.stdin)['result'];print('production_branch =',d.get('production_branch'))"
+          echo "::endgroup::"
+
+      - name: Checkout quvii-site
+        uses: actions/checkout@v4
+        with:
+          repository: JeffZ911/quvii-site
+          token: ${{ secrets.QUVII_SITE_REPO_PAT }}
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install + build
+        run: |
+          npm install
+          npm run build
+
+      - name: Deploy to Cloudflare Pages (now production)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx --yes wrangler@latest pages deploy dist \
+            --project-name quvii-site --branch main --commit-dirty=true
