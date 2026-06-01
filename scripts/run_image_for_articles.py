@@ -140,6 +140,43 @@ def _section_topics(outline: dict | None, max_n: int = 6) -> list[str]:
     return out[:max_n]
 
 
+def _reconcile_existing_hero(slug: str, atype: str) -> None:
+    """When we're about to skip an article because its hero is already on
+    disk, make sure the frontmatter actually points at it. Surgical: injects
+    `hero_image:` ONLY when missing, leaving every other field — and any
+    already-injected inline images in the body — untouched. Reuses the
+    filesystem-only helpers from the reconcile safety-net script so the two
+    paths can never diverge."""
+    from scripts.reconcile_hero_frontmatter import (
+        _find_hero_on_disk,
+        _has_usable_hero,
+        _inject_hero,
+        _split_frontmatter,
+    )
+
+    rel_path = PATH_BY_TYPE.get(atype, "").format(slug=slug)
+    if not rel_path:
+        return
+    md_path = SITE_REPO / "src" / "content" / rel_path
+    if not md_path.exists():
+        return
+    text = md_path.read_text(encoding="utf-8")
+    split = _split_frontmatter(text)
+    if split is None:
+        return
+    fm, _ = split
+    if _has_usable_hero(fm):
+        return  # already wired — nothing to do
+    hero_name = _find_hero_on_disk(SITE_REPO, slug)
+    if not hero_name:
+        return
+    hero_url = f"/img/{slug}/{hero_name}"
+    new_text = _inject_hero(text, hero_url)
+    if new_text:
+        md_path.write_text(new_text, encoding="utf-8")
+        print(f"  ✓ reconciled missing hero_image → {hero_url}")
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--budget-usd", type=float, default=5.0)
@@ -226,10 +263,22 @@ def main() -> int:
         # Skip when hero image already exists — re-running is wasteful
         # (unless --force-regenerate is set, used by the retrofit workflow
         # to upgrade older articles from 3 → 7 images).
+        #
+        # CRITICAL (2026-06-01 fix): before skipping, reconcile the
+        # frontmatter. The disk-fallback writeback below (2026-05-31) was
+        # UNREACHABLE for exactly the articles it was meant to rescue: an
+        # article whose hero.webp landed on disk in a prior partial/crashed
+        # run (image step timed out mid-batch before _patch_frontmatter, or
+        # was committed by a later cron) hits THIS guard and `continue`s
+        # before ever reaching the fallback — so its frontmatter stays
+        # heroless forever (black/placeholder hero, e.g. wyze). Patch the
+        # hero field here, surgically (hero only — never touch already-
+        # injected inline images), then skip the expensive regeneration.
         hero_dir = SITE_REPO / "public" / "img" / slug
         if not args.force_regenerate and (
             (hero_dir / "hero.webp").exists() or (hero_dir / "hero.png").exists()
         ):
+            _reconcile_existing_hero(slug, atype)
             print(f"↪︎  hero exists, skip: {slug}")
             continue
 

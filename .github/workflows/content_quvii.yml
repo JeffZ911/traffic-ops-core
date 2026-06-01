@@ -297,6 +297,22 @@ jobs:
         run: |
           python -m scripts.rewrite_one_article --budget-usd 1.00
 
+      # ------------------------------------------------------------- 5d.
+      # SAFETY NET (2026-06-01): wire any on-disk hero into frontmatter.
+      # Filesystem-only + idempotent. A hero.webp left on disk by a
+      # partial/crashed image step (which the "hero exists, skip" guard in
+      # run_image_for_articles would otherwise never re-patch) still gets a
+      # hero_image field here — BEFORE commit — so the tile/homepage use the
+      # real image instead of the branded placeholder. This is exactly the
+      # wyze-camera-app-keeps-crashing-fixes case. See
+      # scripts/reconcile_hero_frontmatter.py.
+      - name: Reconcile hero images into frontmatter (safety net)
+        if: steps.budget.outputs.action != 'pause_all'
+        continue-on-error: true
+        env:
+          SITE_REPO_PATH: ${{ github.workspace }}/quvii-site
+        run: python -m scripts.reconcile_hero_frontmatter
+
       # ---------------------------------------------------------------- 6.
       # P0 FIX: commit + push the generated content back to the site repo
       # BEFORE wrangler deploy. See content_daily.yml for the full
