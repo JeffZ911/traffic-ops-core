@@ -105,7 +105,11 @@ def _patch_frontmatter(
         skip_block = False
         fm_lines.append(line)
 
-    fm_lines.append(f"hero_image: {hero_url}")
+    # Only write hero_image when we actually have one — never emit
+    # 'hero_image: None' (would set the field to the literal string and
+    # the layout would try to load /None). Callers may patch inline-only.
+    if hero_url:
+        fm_lines.append(f"hero_image: {hero_url}")
     if inline_urls:
         fm_lines.append("inline_images:")
         for u in inline_urls:
@@ -270,11 +274,25 @@ def main() -> int:
         rel_path = PATH_BY_TYPE.get(atype, "").format(slug=slug)
         if rel_path:
             md_path = SITE_REPO / "src" / "content" / rel_path
-            if md_path.exists() and hero_url:
+            # Disk-fallback for the hero (2026-05-31 fix): if this run didn't
+            # return a hero_url (e.g. the hero gen timed out but inline images
+            # succeeded, OR the hero was made by an earlier backfill run), but
+            # the conventional hero file IS on disk, use it. The old code
+            # required hero_url to be truthy to patch AT ALL, so any run that
+            # produced inline images but no fresh hero_url left the article
+            # with NO hero_image frontmatter → black placeholder, even though
+            # a hero.webp existed on disk.
+            if not hero_url:
+                hero_file = SITE_REPO / "public" / "img" / slug / "hero.webp"
+                if hero_file.exists():
+                    hero_url = f"/img/{slug}/hero.webp"
+            if not md_path.exists():
+                print(f"  ⚠️  md file not found: {md_path}")
+            elif hero_url or inline_urls:
                 if _patch_frontmatter(md_path, hero_url, inline_urls, inline_sections):
                     print(f"  ✓ patched {md_path.relative_to(SITE_REPO)}")
             else:
-                print(f"  ⚠️  md file not found: {md_path}")
+                print(f"  ⚠️  no hero or inline images to patch for {slug}")
 
         # Now that image rows exist, roll the image cost into the article's
         # total_cost_usd (text cost was already rolled up by the orchestrator).
