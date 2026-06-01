@@ -320,6 +320,30 @@ class QAAgent(BaseAgent):
 
         feedback["editorial_tier"] = tier
 
+        # PLACEHOLDER HARD-GATE (2026-06-01). The writer is instructed to emit
+        # the sanctioned honesty placeholder "[Information not yet publicly
+        # available as of YYYY-MM-DD]" when a fact can't be verified — correct
+        # anti-fabrication behavior, but it is a VISIBLE hole in the prose
+        # (often mid-sentence or in a spec table) that must never reach a
+        # reader. A 2026-06-01 census found it leaked into 65-75% of published
+        # ntecodex + pixelmatch articles while the score gate was off.
+        #
+        # Unlike the score-based gate below, this ALWAYS holds (even with
+        # quality_gate_enabled=false), exactly like the fabrication hard-gate:
+        # an article that still contains the placeholder at QA time is rejected
+        # so it gets regenerated or dropped. A topic so data-sparse it can't be
+        # written without placeholders SHOULD NOT publish — that's the signal
+        # to drop the keyword, not ship a hole.
+        placeholder_count = len(_HONESTY_PLACEHOLDER_RE.findall(content or ""))
+        if placeholder_count > 0:
+            tier = "reject"
+            feedback["editorial_tier"] = tier
+            feedback["_placeholder_count"] = placeholder_count
+            feedback["_hard_fail"] = (
+                feedback.get("_hard_fail")
+                or f"{placeholder_count} unresolved honesty placeholder(s) in body → reject"
+            )
+
         # Publish gate (raised 2026-05-25): only clean + note ship. The
         # strong band (4.5-6.0) is now ALSO withheld — it was being published
         # then auto-noindex'd (qa_score < 6.0 prune), i.e. pure wasted spend.
