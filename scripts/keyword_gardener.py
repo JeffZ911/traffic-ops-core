@@ -42,6 +42,47 @@ from scripts._keyword_entity_verify import verify_keyword, VerifyResult
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 
+def _salvage_json_objects(text: str) -> list[dict]:
+    """Extract every COMPLETE top-level {...} object from a possibly-truncated
+    JSON array string.
+
+    When an LLM response hits max_tokens mid-array, json.loads() fails on the
+    whole thing, but the objects that DID finish are still valid. This
+    string-aware brace matcher returns those, dropping only the final
+    half-written object. Best-effort: never raises.
+    """
+    out: list[dict] = []
+    depth = 0
+    start: int | None = None
+    in_str = False
+    esc = False
+    for i, ch in enumerate(text):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start is not None:
+                    try:
+                        out.append(json.loads(text[start:i + 1]))
+                    except Exception:
+                        pass
+                    start = None
+    return out
+
+
 # Map article types to natural-language hints we feed the LLM (GAMING niche)
 TYPE_HINTS = {
     "build":        'character build / "best build for X"',
@@ -1109,7 +1150,7 @@ def main() -> int:
     )
 
     resp = provider.generate(
-        prompt=prompt, model=model, max_tokens=4000, temperature=0.5,
+        prompt=prompt, model=model, max_tokens=8000, temperature=0.5,
         json_mode=True, enable_search=True,
     )
 
@@ -1129,8 +1170,21 @@ def main() -> int:
             obj = extract_json("{\"items\": " + text + "}")
             data = obj.get("items", [])
         except Exception:
-            print(f"❌ couldn't parse LLM output:\n{text[:500]}")
-            return 1
+            # Gemini-3 with enable_search + thinking sometimes TRUNCATES the
+            # JSON array mid-object (the response hits max_tokens). Rather than
+            # fail the whole content pipeline over a best-effort top-up, salvage
+            # every COMPLETE {...} object that did make it through.
+            data = _salvage_json_objects(text)
+            if data:
+                print(f"⚠️  LLM output truncated; salvaged {len(data)} complete "
+                      f"keyword object(s) from the partial array.")
+            else:
+                # Nothing usable. Top-up is enrichment, not critical — the pool
+                # already has keywords. Skip this round instead of exiting 1
+                # (which would block publishing).
+                print("⚠️  couldn't parse LLM output (truncated/empty); skipping "
+                      f"top-up this run.\n{text[:300]}")
+                return 0
 
     if not isinstance(data, list):
         # Maybe they returned an object with a key
@@ -1140,8 +1194,8 @@ def main() -> int:
                     data = data[k]
                     break
         if not isinstance(data, list):
-            print(f"❌ unexpected shape: {type(data).__name__}")
-            return 1
+            print(f"⚠️  unexpected shape: {type(data).__name__}; skipping top-up.")
+            return 0
 
     # De-dupe against existing pool
     fresh: list[dict[str, Any]] = []

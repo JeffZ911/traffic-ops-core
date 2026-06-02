@@ -156,6 +156,7 @@ jobs:
       # auto-balance pass is dropped to save an LLM call per starved
       # type — the core top-up still runs.
       - name: Garden the keyword pool
+        continue-on-error: true
         if: steps.budget.outputs.action != 'pause_all'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

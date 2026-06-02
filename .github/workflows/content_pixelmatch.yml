@@ -160,6 +160,7 @@ jobs:
       # ---------------------------------------------------------------- 2.
       # Keyword pool top-up + auto-balance starved article types.
       - name: Garden the keyword pool
+        continue-on-error: true
         if: steps.budget.outputs.action != 'pause_all'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
