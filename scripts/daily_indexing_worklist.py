@@ -46,9 +46,10 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 INDEXED_STATES = {"Submitted and indexed", "Indexed, not submitted in sitemap"}
 STOP_THRESHOLD = 0.80
 # GSC's real per-property quota is ~10-12 request-indexing clicks/day and it
-# is not stable — hitting it mid-list strands the rest. Cap the daily card at
-# 8 so the operator can always finish the whole list without getting blocked.
-DAILY_REQUEST_CAP = 8
+# is not stable. This is a LOW-value first-few-weeks nudge (it only asks Google
+# to *look* sooner — it can't beat the authority wall), so keep it short: 5/day
+# is a 2-minute task the operator can always finish, and it's fine to skip.
+DAILY_REQUEST_CAP = 5
 
 
 def _public_url(domain: str, published_url: str, niche: str) -> str:
