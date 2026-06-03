@@ -44,7 +44,9 @@ PATH_BY_TYPE: dict[str, str] = {
     "use_case":       "stories/{slug}.md",
     "policy_guide":   "policy/{slug}.md",
     # ── security_cameras niche (quvii — Phase 0 2026-05-27) ────────
-    # Quvii uses 4 top-level collections (blog/learn/reviews/support).
+    # Quvii uses 3 top-level collections (blog/learn/support). The Reviews
+    # section was removed 2026-06-03 (camera_review is disallowed — an AI
+    # can't write hands-on product reviews without fabricating testing).
     # blog/* gets sub-categorized via article body's category, not URL.
     # Names prefixed `camera_` to avoid colliding with gaming `comparison`
     # / `news` which already map to different folders.
@@ -54,7 +56,6 @@ PATH_BY_TYPE: dict[str, str] = {
     "camera_troubleshoot":  "blog/{slug}.md",
     "camera_news":          "blog/{slug}.md",
     "camera_learn":         "learn/{slug}.md",
-    "camera_review":        "reviews/{slug}.md",
     "camera_support":       "support/{slug}.md",
 }
 
@@ -91,7 +92,6 @@ URL_BY_TYPE: dict[str, str] = {
     "camera_troubleshoot":  "/blog/{slug}",
     "camera_news":          "/blog/{slug}",
     "camera_learn":         "/learn/{slug}",
-    "camera_review":        "/reviews/{slug}",
     "camera_support":       "/support/{slug}",
 }
 

@@ -6,12 +6,13 @@ Mirrors the shape of _prompts_ecommerce.py but with:
 - Audience tags from the security-camera buyer market (renters, homeowners,
   business installs, etc.) — not gaming or seller demographics
 
-The 8 article_types route to the 4 collections per PATH_BY_TYPE:
+The article_types route to 3 collections per PATH_BY_TYPE:
   blog/    ← camera_buying_guide / camera_comparison / camera_install /
             camera_troubleshoot / camera_news
   learn/   ← camera_learn (pillar-level deep dives)
-  reviews/ ← camera_review (Quvii own + competitor reviews)
   support/ ← camera_support (post-purchase setup docs)
+(Reviews removed 2026-06-03 — camera_review is disallowed; an AI can't write
+hands-on product reviews without fabricating testing claims.)
 """
 
 from __future__ import annotations
