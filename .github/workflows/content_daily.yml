@@ -468,26 +468,6 @@ jobs:
           GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
         run: python -m scripts.ops_autoflag --site ntecodex.com
 
-      # ---------------------------------------------------------------- 7f.
-      # Daily GSC request-indexing worklist → ops_tasks card (top-10
-      # unknown URLs to hand-request). Hour-guarded to ~once/day to
-      # respect the urlInspection quota; auto-graduates off at >80%
-      # indexed. continue-on-error.
-      - name: Daily GSC request-indexing worklist
-        continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
-          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
-        run: |
-          if [ "$(date -u +%H)" = "03" ]; then
-            python -m scripts.daily_indexing_worklist --site ntecodex.com --max-inspect 40
-          else
-            echo "skip — worklist runs once/day at 03:00 UTC (current $(date -u +%H):00)"
-          fi
-
       # ---------------------------------------------------------------- 8.
       # Zero-published streak check. If three days in a row produce no
       # `status='published'` article, fire a warning email so the

@@ -92,8 +92,9 @@ CRITICAL FACTUAL ACCURACY RULES (ecommerce niche):
    d. Reddit r/{platform_subreddit} for current seller sentiment
 
 4. DO NOT invent specific pricing tiers, feature lists, or success
-   metrics. If you cannot verify, write the literal string
-   "[Information not yet publicly available as of {today_iso}]".
+   metrics. If you cannot verify a specific, describe it generically
+   ("pricing varies by plan", "most tools in this category offer a free
+   tier") or omit it — do NOT write a bracketed placeholder.
 
 5. When citing a competitor tool, name them by their real product name
    (Photoroom, Pebblely, Booth.AI, Canva, Removebg, Adobe Express,
@@ -104,23 +105,26 @@ CRITICAL FACTUAL ACCURACY RULES (ecommerce niche):
    from a source, and CITE IT INLINE as a Markdown link on the supporting
    phrase, e.g. `[2000×2000 px minimum](https://sellercentral.amazon.com/...)`
    or `Photoroom's [Pro tier at $12.99/mo](https://photoroom.com/pricing)`.
-   No source → no specific number: describe generically or use the honesty
-   placeholder. An uncited specific is treated as a fabrication risk.
+   No source → no specific number: describe it generically (a qualitative
+   statement, a typical range) or omit it. Never a bracketed placeholder.
+   An uncited specific is treated as a fabrication risk.
 
 6. Promote {brand_name} naturally where it solves the problem being
    discussed. Do NOT bash competitors — say "{brand_name} is better
    suited for X workflow because of Y" instead of "Tool X is bad".
 
-HONESTY PLACEHOLDER RULE:
+NO-PLACEHOLDER HONESTY RULE:
 
   When a specific number, policy date, or feature is not findable via
-  search, write:
+  search, do NOT invent it and do NOT write a bracketed placeholder like
+  "[Information not yet publicly available ...]". Instead, make the point
+  generically ("exact pricing depends on plan and isn't published as a flat
+  rate") or omit the unverifiable specific and keep writing.
 
-      [Information not yet publicly available as of {today_iso}]
-
-  Better an honest gap than a hallucinated stat. QA will FAIL articles
-  containing fabricated pricing, fake A/B test percentages, invented
-  competitor feature lists, or seller names that don't exist.
+  Better an honest, natural sentence than either a hallucinated stat OR a
+  bracket in the middle of the prose. QA hard-FAILS articles that contain
+  fabricated pricing/percentages/feature-lists/fake names — OR any leftover
+  bracketed placeholder.
 """
 
 

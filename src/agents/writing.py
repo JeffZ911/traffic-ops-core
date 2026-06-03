@@ -51,13 +51,23 @@ for fabricated proper nouns):
 
   If you cannot find verified information about a specific proper noun
   (character name, weapon / Arc name, banner name, mechanic / system
-  name), DO NOT INVENT IT. Instead write the exact phrase:
+  name) or a specific number/date, follow TWO hard rules at once:
 
-      [Information not yet publicly available as of {today_iso}]
+    1. DO NOT INVENT IT (no fabricated names, stats, or specifics), and
+    2. DO NOT write a bracketed placeholder of ANY kind, e.g.
+       "[Information not yet publicly available ...]" or
+       "[exact value pending official confirmation]".
 
-  Better an honest gap than a fabricated fact. QA will FAIL the entire
-  article if any unverified proper noun appears — even one fabrication
-  triggers `factual_accuracy = 0` and the article is rejected.
+  Instead, WRITE AROUND IT naturally: refer to the thing generically
+  ("certain endgame characters", "the current limited banner"), give a
+  qualitative statement instead of a fake number, or simply omit the
+  unverifiable detail and keep the sentence flowing. The finished article
+  must read smoothly with ZERO bracketed placeholders and ZERO invented
+  specifics.
+
+  QA will FAIL the entire article BOTH for any fabricated proper noun
+  (`factual_accuracy = 0`) AND for any leftover bracketed placeholder — so
+  clean generic phrasing is the only safe path.
 
   Concrete examples of what to AVOID (these were the actual fabrications
   in the 2026-05-11 incident):
@@ -68,9 +78,11 @@ for fabricated proper nouns):
   - Pseudo-precise statistics like "19.59% damage increase" (numbers
     invented to look authoritative)
 
-  When information is sparse — say so. When a number is uncertain — write
-  "[exact value pending official confirmation]". The reader trusts you
-  MORE when you're honest about gaps.
+  When information is sparse — say so in plain prose ("official figures
+  haven't been published yet"), never with a bracketed token. When a number
+  is uncertain, describe it qualitatively or leave it out. The reader trusts
+  you MORE when you're honest about gaps — but a bracket in the middle of a
+  sentence reads as broken, so phrase the gap as natural language.
 
 HIGH-RISK FABRICATION CATEGORIES (these are what the QA gate catches most
 — a single invented one auto-fails the WHOLE article on factual_accuracy):
@@ -301,8 +313,8 @@ class WritingAgent(BaseAgent):
                 ban_section = (
                     "\nBANNED CLAIMS — these did NOT verify in search last "
                     "time. Do NOT repeat them. If you need to refer to such "
-                    "a fact, write '[Information not yet publicly available "
-                    "as of " + _date.today().isoformat() + "]' or omit:\n"
+                    "a fact, describe it generically or omit it entirely — "
+                    "do NOT write a bracketed placeholder:\n"
                     + bullet + "\n"
                 )
             feedback_block = (
