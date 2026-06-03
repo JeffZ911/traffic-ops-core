@@ -4,12 +4,15 @@ name: SEO Todos (daily worklist refresh)
 # indexing census), so the daily human worklist must keep refreshing even
 # on days we throttle or stop writing articles.
 #
-# Runs ONLY the two worklist scripts, for all 3 sites, writing idempotent
-# (upsert_open_task) cards into ops_tasks → dashboard /todos:
-#   1. seo_growth_loop  --mode authority  → "authority" cards (link-building)
-#   2. daily_indexing_worklist            → "seo-reqidx" cards (GSC Request-Indexing)
+# Writes ONLY clear, methodology-driven cards into ops_tasks → dashboard
+# /todos (the old vague "Authority · Community/Outreach/Asset" + funnel-review
+# cards were retired 2026-06-02 — they had no concrete action):
+#   1. daily_indexing_worklist  → "seo-reqidx" cards, all 3 sites (concrete
+#      GSC Request-Indexing URL list — paste-and-click).
+#   2. sop_worklist             → "authority" SOP cards, QUVII pilot only
+#      (HARO/digital-PR daily SOP + guest-post direct-buy SOP, signed Jeff Zen).
 #
-# No site-repo checkout (both scripts read/write the DB only). No article
+# No site-repo checkout (scripts read/write the DB only). No article
 # generation, no deploys. Safe to run every day.
 
 on:
@@ -41,15 +44,15 @@ jobs:
       - name: Install Python deps
         run: pip install -e .
 
-      - name: Authority + funnel-review worklist
+      - name: Clear SOP cards (HARO + guest-post — Quvii pilot)
+        if: matrix.site == 'quvii.com'
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
-          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
-        run: python -m scripts.seo_growth_loop --site ${{ matrix.site }} --mode authority
+          HARO_LEDGER_URL: ${{ secrets.HARO_LEDGER_URL }}
+        run: python -m scripts.sop_worklist --site ${{ matrix.site }}
 
       - name: Daily GSC Request-Indexing worklist
         continue-on-error: true
