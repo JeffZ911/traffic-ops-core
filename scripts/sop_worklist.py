@@ -44,7 +44,7 @@ def haro_detail(ledger_url: str) -> str:
         "     '— Jeff Zen, Founder & Editor, Quvii (https://quvii.com)'\n"
         "  5. Log every pitch in the ledger.\n\n"
         f"PLATFORMS: {PLATFORMS}\n"
-        "PLAYBOOK (bio + 5 answer templates + full SOP): docs/HARO_PLAYBOOK.md\n"
+        "PLAYBOOK (bio + 10 answer templates + full SOP): docs/HARO_PLAYBOOK.md\n"
         f"LEDGER (log every pitch): {ledger_url}\n\n"
         "RULES: reply within ~30 min of a request; be specific, never sell. "
         "Slow burn — 0-2 placements/week at first is normal; the bi-weekly "

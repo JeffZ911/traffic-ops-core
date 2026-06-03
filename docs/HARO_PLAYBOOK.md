@@ -127,6 +127,51 @@ impressions move.
 > solid night vision and local storage beats a 4K camera streaming everything
 > to a server you pay monthly to access.
 
+**⑥ Smart locks / keyless entry**
+> A smart lock's weakest point usually isn't the lock — it's everything around
+> it. The deadbolt itself is fine; what fails is a dead battery at the worst
+> moment, a flaky Wi-Fi bridge, or auto-unlock that fires from inside the house.
+> Three rules: keep a physical key backup (or a keypad that works offline),
+> put the lock on its own reliable hub rather than leaning on house Wi-Fi, and
+> turn OFF geofenced auto-unlock unless you've tested it for a month. A lock you
+> can't trust to lock is worse than the one it replaced.
+
+**⑦ Renter-friendly security (no drilling, deposit-safe)**
+> Renters can get 90% of the protection with none of the holes. Skip anything
+> hardwired: use battery or plug-in cameras on tension-mount or adhesive bases,
+> a video doorbell that clamps to the existing peephole or door, and a hub that
+> sits on a shelf. Prioritize LOCAL storage or a no-contract plan so you're not
+> locked into a subscription you'll cancel when you move. And photograph where
+> everything sits before install — adhesive mounts come off clean if you warm
+> them with a hairdryer, which protects your deposit.
+
+**⑧ Aging-in-place / checking on an elderly parent**
+> The goal here isn't surveillance, it's reassurance — and consent matters, so
+> involve the person. Favor indoor cameras with two-way audio in shared spaces
+> (never bedrooms or bathrooms), motion sensors that flag "no activity by 10am"
+> rather than streaming everything, and a doorbell so they can see who's there
+> without getting up. Pick a system a non-technical person can actually use:
+> big buttons, simple app, and a backup that works if their internet drops. The
+> best setup is the one the family will still be checking in six months.
+
+**⑨ Does security still work in a power outage / internet outage?**
+> Most consumer systems quietly fail exactly when you'd want them most. A
+> cloud-only camera with no battery is a paperweight during an outage; a Wi-Fi
+> system with no cellular backup goes blind when the internet drops. If outage
+> resilience matters, look for three things: battery backup on the hub/base
+> station, local recording (SD card or NVR) so footage survives without the
+> cloud, and — for alarms — a cellular backup path. Test it: pull the router for
+> ten minutes and see what your system can still do.
+
+**⑩ Too many false alerts / notification fatigue**
+> A camera that cries wolf gets ignored, which defeats the point. False alerts
+> are almost always a tuning problem, not a hardware one: a too-wide field of
+> view catching the street, motion sensitivity cranked to max, and no activity
+> zones. Fix it in this order — draw activity zones to exclude sidewalks and
+> swaying trees, enable person/vehicle detection if the camera has it, and only
+> then lower raw sensitivity. The right setup notifies you about the person at
+> your door, not every passing car and shadow.
+
 ---
 
 ## Ledger
