@@ -7,13 +7,16 @@ name: SEO Todos (daily worklist refresh)
 # /todos. History:
 #   - 2026-06-02: retired the vague "Authority · Community/Outreach/Asset" +
 #     funnel-review cards (no concrete action).
-#   - 2026-06-03: retired the "Daily GSC request-indexing" cards too — a
-#     low-value nudge that can't beat the authority wall; not worth the daily
-#     manual effort. Focus is now the high-value authority work.
+#   - 2026-06-03: retired the "Daily GSC request-indexing" cards too.
+#   - 2026-06-04: REINSTATED request-indexing as per-site copy-paste cards.
+#     GSC diagnosis = "Discovered – currently not indexed": Google hasn't even
+#     crawled the pages, so forcing a crawl IS the right lever now. The cards
+#     are dependency-free (DB only, date-rotating 4 URLs/site) — no GSC API.
+#     HARO retired (too slow); sop_worklist now ships only the guest-post card.
 #
-# Remaining: sop_worklist → two concrete "authority" SOP cards for the Quvii
-# pilot (HARO/digital-PR daily SOP + guest-post direct-buy SOP, signed Jeff
-# Zen). DB-only; no checkout, no article generation, no deploys.
+# Cards: daily_indexing_worklist → 3 per-site request-indexing lists (4 URLs
+# each, rotating); sop_worklist → the guest-post-now card (Quvii). DB-only;
+# no checkout, no article generation, no deploys.
 
 on:
   schedule:
@@ -40,7 +43,15 @@ jobs:
       - name: Install Python deps
         run: pip install -e .
 
-      - name: Clear SOP cards (HARO + guest-post — Quvii pilot)
+      - name: Daily Request-indexing worklist (3 sites · 4 URLs each)
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: python -m scripts.daily_indexing_worklist
+
+      - name: Guest-post SOP card (Quvii pilot)
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

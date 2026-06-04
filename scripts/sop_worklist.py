@@ -6,10 +6,10 @@ i.e. Google hasn't even CRAWLED the pages; it's rationing crawl budget on a
 no-trust new site. This is a trust / crawl-demand wall, NOT a content-quality
 verdict. So the two levers that actually move it:
 
-  1. Daily GSC Request-indexing  — force Google to crawl the discovered pages
-     (free, immediate; on a ~18-page site this can flip several pages).
-  2. Guest-post direct-buy        — a few real editorial links raise trust /
-     crawl demand (do this NOW, per founder decision).
+  - Guest-post direct-buy (THIS card) — a few real editorial links raise
+    trust / crawl demand (do this NOW, per founder decision).
+  - Daily Request-indexing lives in daily_indexing_worklist.py (per-site
+    cards with copy-paste URL lists for GSC).
 
 The old HARO / digital-PR card was RETIRED here (too slow / luck-based to be a
 primary lever) — main() also auto-resolves any open HARO card so it leaves the
@@ -32,11 +32,15 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 from src.utils.ops_tasks import resolve_open_task, upsert_open_task  # noqa: E402
 
 # Retired cards — auto-resolve so they leave the /todos board.
+# (The daily Request-indexing worklist now lives in daily_indexing_worklist.py
+#  as per-site cards; the single-site card once made here is retired too.)
 RETIRED_TITLES = (
     "HARO / 数字PR — 每日 15 分钟 ({site} 试点)",
     "HARO / 数字PR — 每日 15 分钟 (quvii.com 试点)",
     "Guest-post 直采 SOP ({site} 试点)",
     "Guest-post 直采 SOP (quvii.com 试点)",
+    "每日 Request indexing — 强制抓取 ({site})",
+    "每日 Request indexing — 强制抓取 (quvii.com)",
 )
 
 # quvii.com pillar pages — what guest-post links should point at (NOT thin pages).
@@ -45,24 +49,6 @@ PILLAR_PAGES = (
     "/blog/best-outdoor-security-camera-without-subscription",
     "/learn/are-wireless-cameras-safe-from-hackers",
 )
-
-
-def request_indexing_detail() -> str:
-    return (
-        "确诊结论：GSC 显示 quvii.com 唯一不收录原因是 "
-        "「Discovered – currently not indexed」（发现了但还没爬，18 页）—— "
-        "Google 在省抓取预算，不是嫌内容差（那会显示 Crawled – not indexed）。"
-        "对策：手动逼它来爬。这是最快、免费、即时的杠杆。\n\n"
-        "今天就做 (DO THIS TODAY) —— 在 GSC 用 admin@ 登录：\n"
-        "  1. 顶部 URL inspection 框逐条粘贴一个 quvii.com 页面 URL。\n"
-        "  2. 点 'Request indexing'（每天上限 ~10 个）。\n"
-        "  3. 优先 18 个支柱/精华页；两天内把全部 discovered 页跑完。\n"
-        "  4. 每条记一下日期，方便一周后回来看哪些真被收录了。\n\n"
-        "判读（一周后）：\n"
-        "  - 页面陆续变 'Indexed' → 只是新站没排上队，问题在缓解，可暂缓买链接。\n"
-        "  - 爬了仍不收 / 一直卡 discovered → 信任缺口确认 → 上 guest-post 卡。\n\n"
-        "配套（让强制抓取更有效）：确认 sitemap 收全这些页、首页/栏目页有内链指过去。"
-    )
 
 
 def guestpost_detail() -> str:
@@ -94,23 +80,18 @@ def main() -> int:
     ap.add_argument("--site", default="quvii.com")
     args = ap.parse_args()
 
-    # Retire the old HARO card(s) so they leave the board.
+    # Retire superseded cards (HARO, old guest-post SOP, the single-site
+    # request-indexing card — daily_indexing_worklist.py owns indexing now).
     resolved = 0
     for tmpl in RETIRED_TITLES:
         resolved += resolve_open_task(tmpl.format(site=args.site), site_domain=args.site)
 
-    r1 = upsert_open_task(
-        f"每日 Request indexing — 强制抓取 ({args.site})",
-        request_indexing_detail(),
-        priority="high", category="indexing", site_domain=args.site,
-    )
     r2 = upsert_open_task(
         f"Guest-post 直采 — 现在就做 ({args.site})",
         guestpost_detail(),
         priority="high", category="authority", site_domain=args.site,
     )
-    print(f"  ✓ {args.site}: retired {resolved} HARO card(s); "
-          f"request-indexing {r1}, guest-post {r2}")
+    print(f"  ✓ {args.site}: retired {resolved} card(s); guest-post {r2}")
     return 0
 
 
