@@ -25,8 +25,16 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from src.utils.ops_tasks import upsert_open_task  # noqa: E402
 
-PLATFORMS = ("Featured.com · Qwoted · SourceBottle · Help a B2B Writer · "
-             "#JournoRequest (X/Bluesky)")
+PLATFORMS = ("Featured.com（主入口/发现）· Qwoted（投递落地+补充搜索）· "
+             "SourceBottle · Help a B2B Writer · #JournoRequest (X/Bluesky)")
+
+# 主入口 Featured 对话框直接粘贴这句（圈定领域 + 排除杂项 → AI 排序更准）
+FEATURED_PROMPT = (
+    "Find journalist requests where a CONSUMER home-security expert can comment: "
+    "home security cameras, video doorbells, smart locks, package/porch theft, "
+    "DIY/renter security, camera privacy & subscriptions. EXCLUDE: enterprise/B2B "
+    "cybersecurity, MSP, fintech, criminology/true-crime, pure data-privacy law."
+)
 
 
 def haro_detail(ledger_url: str) -> str:
@@ -34,14 +42,24 @@ def haro_detail(ledger_url: str) -> str:
         "通过回答记者提问挣编辑类反向链接（earned editorial backlinks）—— 对新站"
         "最安全、最便宜、ROI 最高的权威建设。每天约 15 分钟。"
         "署名：Jeff Zen, Founder & Editor, Quvii。\n\n"
+        "平台分工（重要）：Featured = 主入口（它聚合 Qwoted/HARO/播客/约稿，一处看全网）；"
+        "Qwoted = 投递落地（标 QWOTED 的请求要点 Open on Qwoted 回去投）+ 补充搜索。"
+        "两个账号都别停。\n\n"
         "今天就做 (DO THIS TODAY):\n"
-        "  1. 打开 Featured.com + Qwoted（用 jeff@quvii.com 登录）。\n"
-        "  2. 筛选：家用安防 / 智能家居 / 隐私 / 消费科技 相关的记者请求。\n"
-        "  3. 挑 1–2 个你能专业回答的，从 playbook 选一个模板，把头两句改成贴合"
-        "记者的具体问题，80–130 词，纯文本。\n"
-        "  4. 每条回复结尾必带署名块 (attribution block)：\n"
+        "  1. 打开 Featured.com（用 jeff@quvii.com 登录），在对话框粘贴这句精准检索词：\n"
+        f"     « {FEATURED_PROMPT} »\n"
+        "  2. 出结果后嫌不准，点 Refine opportunities 再补一句"
+        "'only consumer home security, exclude B2B & cybersecurity'。\n"
+        "  3. 人工终审（30 秒，省不掉）：hashtag/来源是 #HomeSecurity #SmartHome "
+        "#HomeSafety → 投；是 #MSP #Cybersecurity #Fintech #TrueCrime → 跳。\n"
+        "  4. 挑 1–2 个能专业回答的：对口且按钮是 Draft Pitch/Send Email → 直接在"
+        " Featured 投；标 QWOTED → 点 Open on Qwoted 回 Qwoted 投。\n"
+        "  5. 从 playbook 选一个模板，把头两句改成贴合记者的具体问题，80–130 词，"
+        "纯文本；结尾必带署名块：\n"
         "     '— Jeff Zen, Founder & Editor, Quvii (https://quvii.com)'\n"
-        "  5. 每条投递都记进台账。\n\n"
+        "  6. 顺手在 Qwoted 用 48h 筛选翻一遍（捞 Featured 没抓进来的新鲜请求）。\n"
+        "  7. 每条投递都记进台账。\n\n"
+        "省额度：Qwoted 免费额度有限 —— 只在'对口 + 没过期'的请求上花，过期/B2B 一律不投。\n\n"
         f"平台 PLATFORMS: {PLATFORMS}\n"
         "模板手册 PLAYBOOK（bio + 10 个回答模板 + 完整 SOP）: docs/HARO_PLAYBOOK.md\n"
         f"台账 LEDGER（每条都记）: {ledger_url}\n\n"
