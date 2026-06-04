@@ -31,51 +31,46 @@ PLATFORMS = ("Featured.com · Qwoted · SourceBottle · Help a B2B Writer · "
 
 def haro_detail(ledger_url: str) -> str:
     return (
-        "EARNED editorial backlinks by answering journalist source requests — "
-        "the safest, cheapest, highest-ROI authority play for a young site. "
-        "~15 min/day. Signed as: Jeff Zen, Founder & Editor, Quvii.\n\n"
-        "DO THIS TODAY:\n"
-        "  1. Open Featured.com + Qwoted (signed in as jeff@quvii.com).\n"
-        "  2. Filter for: home security / smart home / privacy / consumer tech.\n"
-        "  3. Answer 1-2 queries you can genuinely speak to. Pick a template "
-        "from the playbook, customize the first two lines to the journalist's "
-        "EXACT question, 80-130 words, plain text.\n"
-        "  4. END every reply with the attribution block:\n"
+        "通过回答记者提问挣编辑类反向链接（earned editorial backlinks）—— 对新站"
+        "最安全、最便宜、ROI 最高的权威建设。每天约 15 分钟。"
+        "署名：Jeff Zen, Founder & Editor, Quvii。\n\n"
+        "今天就做 (DO THIS TODAY):\n"
+        "  1. 打开 Featured.com + Qwoted（用 jeff@quvii.com 登录）。\n"
+        "  2. 筛选：家用安防 / 智能家居 / 隐私 / 消费科技 相关的记者请求。\n"
+        "  3. 挑 1–2 个你能专业回答的，从 playbook 选一个模板，把头两句改成贴合"
+        "记者的具体问题，80–130 词，纯文本。\n"
+        "  4. 每条回复结尾必带署名块 (attribution block)：\n"
         "     '— Jeff Zen, Founder & Editor, Quvii (https://quvii.com)'\n"
-        "  5. Log every pitch in the ledger.\n\n"
-        f"PLATFORMS: {PLATFORMS}\n"
-        "PLAYBOOK (bio + 10 answer templates + full SOP): docs/HARO_PLAYBOOK.md\n"
-        f"LEDGER (log every pitch): {ledger_url}\n\n"
-        "RULES: reply within ~30 min of a request; be specific, never sell. "
-        "Slow burn — 0-2 placements/week at first is normal; the bi-weekly "
-        "indexing census shows if Quvii's coverage moves."
+        "  5. 每条投递都记进台账。\n\n"
+        f"平台 PLATFORMS: {PLATFORMS}\n"
+        "模板手册 PLAYBOOK（bio + 10 个回答模板 + 完整 SOP）: docs/HARO_PLAYBOOK.md\n"
+        f"台账 LEDGER（每条都记）: {ledger_url}\n\n"
+        "规则：收到请求 ~30 分钟内回复；要具体、别推销。慢功夫 —— 头几周每周 0–2 "
+        "条命中是正常的；双周普查会告诉你 Quvii 的收录有没有动。"
     )
 
 
 def guestpost_detail() -> str:
     return (
-        "PAID guest-post pilot — a SMALL, safe top-up to the earned (HARO) "
-        "links. Buy DIRECT from established vendors (skip Fiverr middlemen). "
-        "Gray-hat: keep it small + relevant; never bulk.\n\n"
-        "DO THIS (when ready, not daily):\n"
-        "  1. Use FatJoe (fatjoe.com/blogger-outreach) or Rhino Rank "
-        "(rhinorank.io). Both are legit white-label vendors.\n"
-        "  2. Order just 3-5 placements for Quvii. Hard filters:\n"
-        "       - niche = home security / smart home / consumer tech\n"
-        "       - min organic traffic >= ~1,000/mo (ask for the Ahrefs number)\n"
-        "       - dofollow link\n"
-        "  3. Anchor text: mostly branded ('Quvii') or natural phrases "
-        "('home security guide'); avoid exact-match commercial anchors.\n"
-        "  4. Point links at PILLAR pages, not thin posts:\n"
+        "付费 guest-post 试点 —— 对挣来的（HARO）链接做少量、安全的补充。直接找正规"
+        "服务商（跳过 Fiverr 中间商）。灰帽 (gray-hat)：少量 + 相关，绝不走量。\n\n"
+        "什么时候做（不是每天）:\n"
+        "  1. 用 FatJoe (fatjoe.com/blogger-outreach) 或 Rhino Rank "
+        "(rhinorank.io)，都是正规白标商。\n"
+        "  2. Quvii 只下 3–5 条。硬性过滤：\n"
+        "       - niche = 家用安防 / 智能家居 / 消费科技\n"
+        "       - 月自然流量 ≥ ~1,000（让对方给 Ahrefs 数字）\n"
+        "       - dofollow 链接\n"
+        "  3. 锚文本 (anchor text)：以品牌词（'Quvii'）或自然短语（'home security "
+        "guide'）为主；避免精确匹配的商业词。\n"
+        "  4. 链接指向支柱页 (pillar pages)，不是薄文：\n"
         "       /learn/what-is-poe-camera-how-it-works\n"
         "       /blog/best-outdoor-security-camera-without-subscription\n"
         "       /learn/are-wireless-cameras-safe-from-hackers\n"
-        "  5. REJECT any placement on a low-traffic / general-topic / 'write "
-        "for us' spam site. Vet each URL before approving.\n\n"
-        "BUDGET: ~$150-250/link is the real market rate. Cap the pilot at "
-        "$500-750. Verify impact in the bi-weekly census before scaling.\n"
-        "AVOID entirely: bulk packages (1000+ links), PBNs, web2.0, "
-        "directory/profile links, press-release links (nofollow, no value)."
+        "  5. 拒绝任何低流量 / 泛主题 / 'write for us' 垃圾站。每条 URL 批准前先核。\n\n"
+        "预算：单条真实市场价 ~$150–250。试点封顶 $500–750。先用双周普查看效果再放量。\n"
+        "绝对避免：批量套餐（1000+ 链接）、PBN、web2.0、目录/profile 链接、"
+        "新闻稿链接（nofollow、无价值）。"
     )
 
 
@@ -87,12 +82,12 @@ def main() -> int:
     ledger_url = os.getenv("HARO_LEDGER_URL") or "see docs/HARO_PLAYBOOK.md → Ledger"
 
     r1 = upsert_open_task(
-        f"HARO / digital-PR — daily 15 min ({args.site} pilot)",
+        f"HARO / 数字PR — 每日 15 分钟 ({args.site} 试点)",
         haro_detail(ledger_url),
         priority="normal", category="authority", site_domain=args.site,
     )
     r2 = upsert_open_task(
-        f"Guest-post direct-buy SOP ({args.site} pilot)",
+        f"Guest-post 直采 SOP ({args.site} 试点)",
         guestpost_detail(),
         priority="low", category="authority", site_domain=args.site,
     )
