@@ -1,14 +1,21 @@
 """Clear, methodology-driven SOP cards → dashboard /todos.
 
-Replaces the old vague "Authority · Community/Outreach/Asset" cards (generic
-lists with no clear action) with concrete, do-this-now SOPs. Idempotent
-(stable titles → upsert_open_task updates in place, never duplicates).
+Strategy pivot (2026-06-04): GSC diagnosis for quvii.com shows the only
+indexing blocker is **"Discovered – currently not indexed" (18 pages)** —
+i.e. Google hasn't even CRAWLED the pages; it's rationing crawl budget on a
+no-trust new site. This is a trust / crawl-demand wall, NOT a content-quality
+verdict. So the two levers that actually move it:
 
-Cards written (Quvii pilot):
-  1. HARO / digital-PR daily SOP   — earned editorial links (safest, cheapest)
-  2. Guest-post direct-buy SOP     — how to buy a small, safe paid pilot
+  1. Daily GSC Request-indexing  — force Google to crawl the discovered pages
+     (free, immediate; on a ~18-page site this can flip several pages).
+  2. Guest-post direct-buy        — a few real editorial links raise trust /
+     crawl demand (do this NOW, per founder decision).
 
-The concrete GSC Request-Indexing card is handled by daily_indexing_worklist.
+The old HARO / digital-PR card was RETIRED here (too slow / luck-based to be a
+primary lever) — main() also auto-resolves any open HARO card so it leaves the
+board.
+
+Idempotent (stable titles → upsert_open_task updates in place, never dupes).
 
 Usage:
   python -m scripts.sop_worklist --site quvii.com
@@ -16,75 +23,65 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-from src.utils.ops_tasks import upsert_open_task  # noqa: E402
+from src.utils.ops_tasks import resolve_open_task, upsert_open_task  # noqa: E402
 
-PLATFORMS = ("Featured.com（主入口/发现）· Qwoted（投递落地+补充搜索）· "
-             "SourceBottle · Help a B2B Writer · #JournoRequest (X/Bluesky)")
+# Retired cards — auto-resolve so they leave the /todos board.
+RETIRED_TITLES = (
+    "HARO / 数字PR — 每日 15 分钟 ({site} 试点)",
+    "HARO / 数字PR — 每日 15 分钟 (quvii.com 试点)",
+    "Guest-post 直采 SOP ({site} 试点)",
+    "Guest-post 直采 SOP (quvii.com 试点)",
+)
 
-# 主入口 Featured 对话框直接粘贴这句（圈定领域 + 排除杂项 → AI 排序更准）
-FEATURED_PROMPT = (
-    "Find journalist requests where a CONSUMER home-security expert can comment: "
-    "home security cameras, video doorbells, smart locks, package/porch theft, "
-    "DIY/renter security, camera privacy & subscriptions. EXCLUDE: enterprise/B2B "
-    "cybersecurity, MSP, fintech, criminology/true-crime, pure data-privacy law."
+# quvii.com pillar pages — what guest-post links should point at (NOT thin pages).
+PILLAR_PAGES = (
+    "/learn/what-is-poe-camera-how-it-works",
+    "/blog/best-outdoor-security-camera-without-subscription",
+    "/learn/are-wireless-cameras-safe-from-hackers",
 )
 
 
-def haro_detail(ledger_url: str) -> str:
+def request_indexing_detail() -> str:
     return (
-        "通过回答记者提问挣编辑类反向链接（earned editorial backlinks）—— 对新站"
-        "最安全、最便宜、ROI 最高的权威建设。每天约 15 分钟。"
-        "署名：Jeff Zen, Founder & Editor, Quvii。\n\n"
-        "平台分工（重要）：Featured = 主入口（它聚合 Qwoted/HARO/播客/约稿，一处看全网）；"
-        "Qwoted = 投递落地（标 QWOTED 的请求要点 Open on Qwoted 回去投）+ 补充搜索。"
-        "两个账号都别停。\n\n"
-        "今天就做 (DO THIS TODAY):\n"
-        "  1. 打开 Featured.com（用 jeff@quvii.com 登录），在对话框粘贴这句精准检索词：\n"
-        f"     « {FEATURED_PROMPT} »\n"
-        "  2. 出结果后嫌不准，点 Refine opportunities 再补一句"
-        "'only consumer home security, exclude B2B & cybersecurity'。\n"
-        "  3. 人工终审（30 秒，省不掉）：hashtag/来源是 #HomeSecurity #SmartHome "
-        "#HomeSafety → 投；是 #MSP #Cybersecurity #Fintech #TrueCrime → 跳。\n"
-        "  4. 挑 1–2 个能专业回答的：对口且按钮是 Draft Pitch/Send Email → 直接在"
-        " Featured 投；标 QWOTED → 点 Open on Qwoted 回 Qwoted 投。\n"
-        "  5. 从 playbook 选一个模板，把头两句改成贴合记者的具体问题，80–130 词，"
-        "纯文本；结尾必带署名块：\n"
-        "     '— Jeff Zen, Founder & Editor, Quvii (https://quvii.com)'\n"
-        "  6. 顺手在 Qwoted 用 48h 筛选翻一遍（捞 Featured 没抓进来的新鲜请求）。\n"
-        "  7. 每条投递都记进台账。\n\n"
-        "省额度：Qwoted 免费额度有限 —— 只在'对口 + 没过期'的请求上花，过期/B2B 一律不投。\n\n"
-        f"平台 PLATFORMS: {PLATFORMS}\n"
-        "模板手册 PLAYBOOK（bio + 10 个回答模板 + 完整 SOP）: docs/HARO_PLAYBOOK.md\n"
-        f"台账 LEDGER（每条都记）: {ledger_url}\n\n"
-        "规则：收到请求 ~30 分钟内回复；要具体、别推销。慢功夫 —— 头几周每周 0–2 "
-        "条命中是正常的；双周普查会告诉你 Quvii 的收录有没有动。"
+        "确诊结论：GSC 显示 quvii.com 唯一不收录原因是 "
+        "「Discovered – currently not indexed」（发现了但还没爬，18 页）—— "
+        "Google 在省抓取预算，不是嫌内容差（那会显示 Crawled – not indexed）。"
+        "对策：手动逼它来爬。这是最快、免费、即时的杠杆。\n\n"
+        "今天就做 (DO THIS TODAY) —— 在 GSC 用 admin@ 登录：\n"
+        "  1. 顶部 URL inspection 框逐条粘贴一个 quvii.com 页面 URL。\n"
+        "  2. 点 'Request indexing'（每天上限 ~10 个）。\n"
+        "  3. 优先 18 个支柱/精华页；两天内把全部 discovered 页跑完。\n"
+        "  4. 每条记一下日期，方便一周后回来看哪些真被收录了。\n\n"
+        "判读（一周后）：\n"
+        "  - 页面陆续变 'Indexed' → 只是新站没排上队，问题在缓解，可暂缓买链接。\n"
+        "  - 爬了仍不收 / 一直卡 discovered → 信任缺口确认 → 上 guest-post 卡。\n\n"
+        "配套（让强制抓取更有效）：确认 sitemap 收全这些页、首页/栏目页有内链指过去。"
     )
 
 
 def guestpost_detail() -> str:
+    pillars = "\n".join(f"       {p}" for p in PILLAR_PAGES)
     return (
-        "付费 guest-post 试点 —— 对挣来的（HARO）链接做少量、安全的补充。直接找正规"
-        "服务商（跳过 Fiverr 中间商）。灰帽 (gray-hat)：少量 + 相关，绝不走量。\n\n"
-        "什么时候做（不是每天）:\n"
+        "现在就做（founder 决定）：少量、安全的付费 guest-post，给新站灌入前几条"
+        "真实编辑链接，抬高信任 / 抓取需求 —— 直接对着 'Discovered–not indexed' "
+        "下药。直接找正规白标商（跳过 Fiverr 中间商）。灰帽：少量 + 相关，绝不走量。\n\n"
+        "执行步骤:\n"
         "  1. 用 FatJoe (fatjoe.com/blogger-outreach) 或 Rhino Rank "
         "(rhinorank.io)，都是正规白标商。\n"
-        "  2. Quvii 只下 3–5 条。硬性过滤：\n"
+        "  2. Quvii 只下 3–5 条。硬性过滤:\n"
         "       - niche = 家用安防 / 智能家居 / 消费科技\n"
         "       - 月自然流量 ≥ ~1,000（让对方给 Ahrefs 数字）\n"
         "       - dofollow 链接\n"
         "  3. 锚文本 (anchor text)：以品牌词（'Quvii'）或自然短语（'home security "
         "guide'）为主；避免精确匹配的商业词。\n"
-        "  4. 链接指向支柱页 (pillar pages)，不是薄文：\n"
-        "       /learn/what-is-poe-camera-how-it-works\n"
-        "       /blog/best-outdoor-security-camera-without-subscription\n"
-        "       /learn/are-wireless-cameras-safe-from-hackers\n"
+        "  4. 链接指向支柱页 (pillar pages)，不是薄文:\n"
+        f"{pillars}\n"
         "  5. 拒绝任何低流量 / 泛主题 / 'write for us' 垃圾站。每条 URL 批准前先核。\n\n"
         "预算：单条真实市场价 ~$150–250。试点封顶 $500–750。先用双周普查看效果再放量。\n"
         "绝对避免：批量套餐（1000+ 链接）、PBN、web2.0、目录/profile 链接、"
@@ -97,19 +94,23 @@ def main() -> int:
     ap.add_argument("--site", default="quvii.com")
     args = ap.parse_args()
 
-    ledger_url = os.getenv("HARO_LEDGER_URL") or "see docs/HARO_PLAYBOOK.md → Ledger"
+    # Retire the old HARO card(s) so they leave the board.
+    resolved = 0
+    for tmpl in RETIRED_TITLES:
+        resolved += resolve_open_task(tmpl.format(site=args.site), site_domain=args.site)
 
     r1 = upsert_open_task(
-        f"HARO / 数字PR — 每日 15 分钟 ({args.site} 试点)",
-        haro_detail(ledger_url),
-        priority="normal", category="authority", site_domain=args.site,
+        f"每日 Request indexing — 强制抓取 ({args.site})",
+        request_indexing_detail(),
+        priority="high", category="indexing", site_domain=args.site,
     )
     r2 = upsert_open_task(
-        f"Guest-post 直采 SOP ({args.site} 试点)",
+        f"Guest-post 直采 — 现在就做 ({args.site})",
         guestpost_detail(),
-        priority="low", category="authority", site_domain=args.site,
+        priority="high", category="authority", site_domain=args.site,
     )
-    print(f"  ✓ {args.site}: HARO card {r1}, guest-post card {r2}")
+    print(f"  ✓ {args.site}: retired {resolved} HARO card(s); "
+          f"request-indexing {r1}, guest-post {r2}")
     return 0
 
 
