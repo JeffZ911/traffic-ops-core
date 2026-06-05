@@ -330,6 +330,22 @@ def run_trending(site_id: UUID, config: dict, existing: set[str], args) -> int:
             n_target=args.target, types=", ".join(types),
         )
 
+    # Self-improvement loop: inject the latest AI guidance (from qdf_report's
+    # retrospective on how past trend pages performed) so each generation
+    # builds on what actually won impressions — knowledge flows day to day.
+    try:
+        from src.utils.qdf_memory import latest_qdf_guidance
+        _guidance = latest_qdf_guidance(site_id)
+        if _guidance:
+            prompt += (
+                "\n\nLEARNINGS FROM OUR RECENT PERFORMANCE (apply these — they "
+                "are derived from how our last trend pages actually performed on "
+                "Google; favour what worked, avoid what didn't):\n" + _guidance + "\n"
+            )
+            print("   🧠 injected prior QDF guidance into the trend prompt")
+    except Exception as _e:  # noqa: BLE001 — guidance is an enhancement, never fatal
+        print(f"   ⚠️  guidance inject skipped: {type(_e).__name__}")
+
     provider = get_llm_provider("gemini")
     text_cfg = config.get("text_provider") or {}
     model = (text_cfg.get("keyword_research_model")
