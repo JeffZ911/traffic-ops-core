@@ -32,6 +32,12 @@ from src.db.client import get_db_connection
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
+# GSC finalizes performance data ~2-3 days late, so 'yesterday' is always in
+# the empty lag window. Re-fetch a trailing window each run so the real numbers
+# backfill once GSC settles them; refresh top-queries raw for a settled day.
+GSC_LAG_DAYS = 3
+GSC_BACKFILL_DAYS = 5
+
 
 def active_sites() -> list[tuple[UUID, str]]:
     with get_db_connection() as conn, conn.cursor() as cur:
@@ -42,7 +48,8 @@ def active_sites() -> list[tuple[UUID, str]]:
 
 
 def run_one(
-    site_id: UUID, domain: str, target_date: date, sources: tuple[str, ...]
+    site_id: UUID, domain: str, target_date: date, sources: tuple[str, ...],
+    gsc_backfill_days: int = GSC_BACKFILL_DAYS,
 ) -> dict[str, str]:
     """Return {source: 'ok' | f'fail: {msg}'} for the report."""
     out: dict[str, str] = {}
@@ -60,12 +67,31 @@ def run_one(
 
     if "gsc" in sources:
         try:
-            _, parsed = gsc.fetch(site_id, target_date)
-            aggregate.merge_gsc(site_id, target_date, parsed)
-            out["gsc"] = (
-                f"ok (clicks={parsed.clicks}, impressions={parsed.impressions})"
-                if parsed else "ok (no rows — zeros written)"
-            )
+            # Backfill a trailing window: settled (late) data overwrites the
+            # zeros earlier runs wrote while inside GSC's 2-3 day lag. Only the
+            # dates GSC returns are written — missing dates stay untouched
+            # (NULL / prior value), never clobbered with a false 0.
+            win_start = target_date - timedelta(days=gsc_backfill_days)
+            ranged = gsc.fetch_range(site_id, win_start, target_date)
+            for d, daily in ranged.items():
+                aggregate.merge_gsc(site_id, d, daily)
+            # Refresh the per-query raw payload for a settled day so keyword
+            # expansion reads real top_queries (best-effort).
+            try:
+                gsc.fetch(site_id, target_date - timedelta(days=GSC_LAG_DAYS))
+            except Exception:
+                pass
+            if ranged:
+                latest = max(ranged)
+                d = ranged[latest]
+                out["gsc"] = (
+                    f"ok (backfilled {len(ranged)} day(s); latest {latest}: "
+                    f"impr={d.impressions}, clicks={d.clicks}, "
+                    f"pos={d.avg_position:.1f})" if d.avg_position is not None
+                    else f"ok (backfilled {len(ranged)} day(s))"
+                )
+            else:
+                out["gsc"] = "ok (no settled GSC data in window yet)"
         except Exception as e:
             out["gsc"] = f"fail: {type(e).__name__}: {str(e)[:200]}"
 
@@ -78,6 +104,11 @@ def main() -> int:
                    help="ISO date (default: yesterday in UTC)")
     p.add_argument(
         "--source", choices=("ga4", "gsc", "all"), default="all",
+    )
+    p.add_argument(
+        "--gsc-backfill", type=int, default=GSC_BACKFILL_DAYS,
+        help=f"GSC trailing-window days to re-fetch (default {GSC_BACKFILL_DAYS}; "
+             "set high once, e.g. 35, to backfill history)",
     )
     args = p.parse_args()
 
@@ -96,7 +127,8 @@ def main() -> int:
     overall_fail = 0
     for site_id, domain in sites:
         print(f"▶ {domain}  ({str(site_id)[:8]}…)")
-        results = run_one(site_id, domain, target, sources)
+        results = run_one(site_id, domain, target, sources,
+                          gsc_backfill_days=args.gsc_backfill)
         for src, status in results.items():
             mark = "✅" if status.startswith("ok") else "❌"
             print(f"   {mark} {src}: {status}")

@@ -108,3 +108,41 @@ def fetch(site_id: UUID, target_date: date) -> tuple[dict[str, Any], GSCDaily | 
         avg_position=float(r["position"]) if "position" in r else None,
     )
     return raw, parsed
+
+
+def fetch_range(
+    site_id: UUID, start_date: date, end_date: date
+) -> dict[date, GSCDaily]:
+    """Fetch clicks/impressions/position for every date in [start, end] in a
+    SINGLE searchanalytics query (dimensions=['date']).
+
+    GSC finalizes performance data 2-3 days late, so a daily collector that
+    only queries 'yesterday' always hits the empty lag window and stores zeros
+    that never get corrected. Re-fetching a trailing window each run lets the
+    late-arriving real numbers overwrite those zeros. Only dates GSC actually
+    returns are included — callers should NOT write zeros for missing dates
+    (a missing date = "not settled yet", not "zero traffic").
+    """
+    from googleapiclient.discovery import build
+
+    creds = get_user_credentials()
+    svc = build("searchconsole", "v1", credentials=creds, cache_discovery=False)
+    site_url = _site_property(site_id)
+
+    body = {
+        "startDate": start_date.isoformat(),
+        "endDate": end_date.isoformat(),
+        "dimensions": ["date"],
+        "rowLimit": 1000,
+    }
+    resp = _try_query(svc, site_url, body)
+
+    out: dict[date, GSCDaily] = {}
+    for r in resp.get("rows", []):
+        d = date.fromisoformat(r["keys"][0])
+        out[d] = GSCDaily(
+            clicks=int(r.get("clicks", 0)),
+            impressions=int(r.get("impressions", 0)),
+            avg_position=float(r["position"]) if "position" in r else None,
+        )
+    return out
