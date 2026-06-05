@@ -391,6 +391,29 @@ jobs:
           npx --yes wrangler@latest pages deploy dist \
             --project-name pixelmatch-blog --branch main --commit-dirty=true
 
+      # ---------------------------------------------------------------- 8b.
+      # QDF P4 (§3.3.3 巡检前端/崩溃即重启): confirm the live deploy actually
+      # serves real HTML (homepage + newest article); if a broken/blank deploy
+      # slipped through, re-push the built dist once and alert. Guards the
+      # git-connected empty-build-command failure we've hit before.
+      - name: Verify live deploy (+ auto-redeploy)
+        if: steps.budget.outputs.action != 'pause_all' && env.skip_deploy != 'true'
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_RECIPIENT_EMAIL: ${{ secrets.ALERT_RECIPIENT_EMAIL }}
+        run: |
+          python -m scripts.verify_live_deploy --site pixelmatch.art --redeploy \
+            --dist ${{ github.workspace }}/pixelmatch-site/dist --project pixelmatch-blog
+
       # ---------------------------------------------------------------- 7b.
       # Re-submit sitemap to GSC (see content_daily.yml for rationale).
       - name: Re-submit sitemap to GSC
