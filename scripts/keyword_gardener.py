@@ -335,7 +335,10 @@ def run_trending(site_id: UUID, config: dict, existing: set[str], args) -> int:
     model = (text_cfg.get("keyword_research_model")
              or text_cfg.get("outline_model") or "gemini-3-flash-preview")
     print(f"   📈 trend scan ({'security' if sec else 'ecommerce' if ecom else 'gaming'})")
-    resp = provider.generate(prompt=prompt, model=model, max_tokens=3000,
+    # max_tokens 3000→6000: Gemini-3 + search emits a thinking preamble then the
+    # array, and 3000 frequently truncated mid-array → "trend parse failed" → 0
+    # trend keywords seeded that day (QDF day wasted). More headroom + salvage.
+    resp = provider.generate(prompt=prompt, model=model, max_tokens=6000,
                              temperature=0.4, json_mode=True, enable_search=True)
     try:
         data = json.loads(resp.text.strip())
@@ -343,7 +346,14 @@ def run_trending(site_id: UUID, config: dict, existing: set[str], args) -> int:
         try:
             data = extract_json("{\"items\": " + resp.text + "}").get("items", [])
         except Exception:
-            print("   ⚠️  trend parse failed"); return 0
+            # Last-ditch: brace-match every COMPLETE {...} from a truncated
+            # array (same salvage the top-up path uses) — never lose a whole
+            # QDF day to one truncated response.
+            data = _salvage_json_objects(resp.text)
+            if data:
+                print(f"   ⚠️  trend output truncated; salvaged {len(data)} object(s)")
+            else:
+                print("   ⚠️  trend parse failed"); return 0
     if isinstance(data, dict):
         for k in ("keywords", "items", "results"):
             if isinstance(data.get(k), list):

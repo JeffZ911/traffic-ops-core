@@ -60,16 +60,24 @@ COMP_VOLUME_BONUS = 10.0    # volume band ≥ 2 (real demand) on top of above
 def _trend_freshness_bonus(source: str | None, age_days: float | None) -> float:
     """Trend-jacking: source='trend' keywords get a big bonus that DECAYS so
     they're written while the topic is hot (QDF window), then expire. Only
-    applies to trend-sourced keywords — evergreen keywords are unaffected."""
+    applies to trend-sourced keywords — evergreen keywords are unaffected.
+
+    QDF "6h 极速" guarantee: a JUST-SEEDED trend (age≈0, same 03:00 run that
+    seeded it) must DOMINATE selection so it publishes same-run and hits the
+    3-12h freshness window. The top reward must out-score the strongest
+    evergreen (base ~95 + low-comp 40 + volume 10 ≈ 145), so age<1 → +150.
+    Decays fast: a trend is only worth racing while it's hot."""
     if source != "trend" or age_days is None:
         return 0.0
     a = float(age_days)
+    if a < 1:
+        return 150.0   # seeded today → dominate, publish this run (QDF window)
     if a < 3:
-        return 50.0
+        return 80.0
     if a < 7:
-        return 25.0
+        return 30.0
     if a < 14:
-        return 5.0
+        return 10.0
     return 0.0  # stale trend — no longer boosted (falls back to base priority)
 
 # QA-pass-rate weighting thresholds (Phase 2.4 — 2026-05-12).
