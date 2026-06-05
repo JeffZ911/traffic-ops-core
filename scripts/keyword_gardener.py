@@ -242,22 +242,63 @@ Reply ONLY with a JSON array (no fence), each element:
 """
 
 
+SECURITY_TREND_PROMPT = """You are a trend researcher for {brand_name}, an
+independent home-security research site (security cameras, video doorbells,
+smart locks, sensors, smart-home security, consumer privacy).
+
+Use Google Search to find what is TRENDING RIGHT NOW in CONSUMER home security
+(rising interest in the last 7 days). Strong angles:
+  - Security INCIDENTS: camera/account breaches, hacks, leaks, or outages tied
+    to a named brand (a documented Wyze / Ring / Eufy / ADT / Nest event).
+  - RECALLS / safety notices on cameras, doorbells, locks, hubs, batteries.
+  - NEW PRODUCT launches (new Ring / Arlo / Eufy / Reolink / Nest model, CES).
+  - PRICE / shopping events (Prime Day, Black Friday, major drops) on cameras.
+  - REGULATION / privacy: new laws, HOA / landlord camera rules, settlements.
+  - SEASONAL: holiday porch-theft season, summer-travel home safety, DST.
+
+HARD RULES — avoid fabrication (a fabricated event poisons the whole article):
+- ONLY propose a trend you can back with a REAL, CURRENT, openable source. The
+  triggering event MUST already be documented (news report, brand advisory,
+  recall notice). If you cannot open a page describing it now, SKIP it.
+- NEVER invent a breach, recall, lawsuit, model name, price, or date. Do not
+  propose "<Brand> <Year> data breach" unless a real report documents it.
+- The notes field MUST name the trigger event + its source (outlet / URL).
+- NO video games, gacha, or anime topics — this is a home-security site.
+
+Existing keywords (do NOT duplicate, case-insensitive):
+{existing_sample}
+
+Return up to {n_target} keywords capturing rising interest, each mapping to ONE
+of these article types: {types}. If there are no real, sourceable trends right
+now, return fewer (or an empty array) rather than inventing any.
+
+Reply ONLY with a JSON array (no fence), each element:
+{{"keyword": "<lowercase 4-9 words>", "intent": "informational|comparison|how-to|list",
+  "article_type": "<one of the types>", "priority_score": <70-95>,
+  "notes": "<the trigger event + source outlet/URL>"}}
+"""
+
+# Trend-friendly subset of quvii's article types (install/troubleshoot aren't
+# time-sensitive). Intersected with the site's allowed types at runtime.
+SECURITY_TREND_TYPES = [
+    "camera_news", "camera_buying_guide", "camera_comparison", "camera_learn",
+]
+
+
 def run_trending(site_id: UUID, config: dict, existing: set[str], args) -> int:
     """Seed time-sensitive 'trend' keywords (source='trend'). KeywordSelector
     gives these a freshness bonus (by created_at) that decays over ~2 weeks,
     so they get written fast then expire. Returns rows inserted."""
-    # Niche guard: like auto_balance_types, trend scan's gaming fallback
-    # branch generates game-themed keywords (referencing game release dates)
-    # which pollutes the security_cameras pool. Skip until a security-
-    # specific TREND_PROMPT exists.
     niche = _niche(config)
-    if niche == "security_cameras":
-        print(f"   📈 trend scan: skipped (niche={niche} — no trend prompt yet)")
-        return 0
-
     ecom = _is_ecom(config)
+    sec = (niche == "security_cameras")
     type_blacklist = list((config.get("content_plan") or {}).get("type_blacklist") or [])
-    if ecom:
+    if sec:
+        allowed = config.get("allowed_article_types") or SECURITY_TREND_TYPES
+        types = [t for t in SECURITY_TREND_TYPES
+                 if t in allowed and t not in type_blacklist]
+        brand_name = (config.get("brand") or {}).get("name") or "this home-security site"
+    elif ecom:
         types = [t for t in (config.get("allowed_article_types")
                              or list(ECOM_TYPE_HINTS.keys())) if t not in type_blacklist]
         brand_name = (config.get("brand") or {}).get("name") or "this ecommerce blog"
@@ -269,7 +310,12 @@ def run_trending(site_id: UUID, config: dict, existing: set[str], args) -> int:
         existing_sample = existing_sample[:25] + existing_sample[-25:]
     existing_lines = "\n".join(f"  - {kw}" for kw in existing_sample) or "  (empty pool)"
 
-    if ecom:
+    if sec:
+        prompt = SECURITY_TREND_PROMPT.format(
+            brand_name=brand_name, existing_sample=existing_lines,
+            n_target=args.target, types=", ".join(types),
+        )
+    elif ecom:
         prompt = ECOM_TREND_PROMPT.format(
             brand_name=brand_name, existing_sample=existing_lines,
             n_target=args.target, types=", ".join(types),
@@ -288,7 +334,7 @@ def run_trending(site_id: UUID, config: dict, existing: set[str], args) -> int:
     text_cfg = config.get("text_provider") or {}
     model = (text_cfg.get("keyword_research_model")
              or text_cfg.get("outline_model") or "gemini-3-flash-preview")
-    print(f"   📈 trend scan ({'ecommerce' if ecom else 'gaming'})")
+    print(f"   📈 trend scan ({'security' if sec else 'ecommerce' if ecom else 'gaming'})")
     resp = provider.generate(prompt=prompt, model=model, max_tokens=3000,
                              temperature=0.4, json_mode=True, enable_search=True)
     try:

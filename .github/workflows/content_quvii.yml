@@ -182,8 +182,10 @@ jobs:
 
       # ------------------------------------------------------------- 2b.
       # Trend-jacking ("蹭话题"): once/day at 03:00 UTC, seed time-sensitive
-      # ecommerce 'trend' keywords (new AI tools, platform policy changes,
-      # selling events). KeywordSelector decays their freshness bonus.
+      # home-security 'trend' keywords (camera breaches/recalls, new model
+      # launches, Prime Day/BF deals, privacy regulation, seasonal porch-theft)
+      # via SECURITY_TREND_PROMPT. This is the QDF lever a zero-authority new
+      # site can actually win. KeywordSelector decays their freshness bonus.
       - name: Trend scan (keyword gardener --trending)
         if: steps.budget.outputs.action != 'pause_all'
         continue-on-error: true
