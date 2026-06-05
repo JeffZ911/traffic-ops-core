@@ -1018,6 +1018,20 @@ def main() -> int:
         planned_count = cur.fetchone()[0]
         existing = _existing_keywords(cur, site_id)
 
+    # Fail-safe niche guard: every generation path branches on niche, and a
+    # MISSING niche used to default to "gaming" (config.get("niche") or
+    # "gaming") — which silently seeds game keywords into any mis-configured
+    # site (this is how NTE/Neverness keywords leaked into the quvii +
+    # pixelmatch pools). Refuse to generate for an unknown niche rather than
+    # default to gaming. All real sites set sites.config.niche explicitly.
+    KNOWN_NICHES = {"gaming", "ecommerce_tools", "security_cameras"}
+    raw_niche = (config or {}).get("niche")
+    if raw_niche not in KNOWN_NICHES:
+        print(f"❌ site {site_domain!r} has unknown/missing niche={raw_niche!r}; "
+              f"refusing to generate (fail-safe against cross-niche pollution). "
+              f"Set sites.config.niche to one of {sorted(KNOWN_NICHES)}.")
+        return 2
+
     ecom = _is_ecom(config)
 
     # Trend mode is a separate concern from evergreen pool top-up.
@@ -1027,7 +1041,7 @@ def main() -> int:
         return 0
 
     print(f"🌱 Keyword Gardener")
-    print(f"   site:           {site_domain}  (niche={'ecommerce_tools' if ecom else 'gaming'})")
+    print(f"   site:           {site_domain}  (niche={raw_niche})")
     print(f"   planned now:    {planned_count}")
     print(f"   threshold:      {args.min_planned}")
     print(f"   total in pool:  {len(existing)}")
@@ -1088,6 +1102,17 @@ def main() -> int:
                                n_target=6, budget_usd=args.budget_usd)
         except Exception as e:
             print(f"   ⚠️  affiliate seed failed: {type(e).__name__}: {e}")
+
+    # security_cameras has NO niche-specific top-up prompt yet, and the
+    # generic top-up path below branches only ecom-vs-gaming — so this niche
+    # would fall through to the GAMING PROMPT_TEMPLATE (which forces
+    # "nte/neverness" into every keyword). That is the active leak vector for
+    # quvii. The pool is seeded manually (bootstrap_quvii) + by AI camera
+    # keywords; skip LLM top-up here until a SECURITY_PROMPT_TEMPLATE lands.
+    if raw_niche == "security_cameras":
+        print("   🛡️  security_cameras: no auto top-up prompt yet — pool seeded "
+              "manually (bootstrap_quvii). Skipping LLM top-up to avoid gaming leak.")
+        return 0
 
     if planned_count >= args.min_planned and not args.force:
         print(f"   ✓ above threshold — no top-up action")

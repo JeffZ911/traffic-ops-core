@@ -293,6 +293,30 @@ def _set_keyword_status(keyword_id: UUID, status: str) -> None:
         )
 
 
+def _reap_stale_in_progress(site_id: UUID, *, older_than_hours: int = 2, log=print) -> int:
+    """Self-heal zombie 'in_progress' keywords.
+
+    A keyword is flipped to in_progress when a run claims it; the terminal
+    transitions (→completed / →planned) live in run_one_article's success/
+    failure paths. But a hard kill (workflow timeout/cancel, SIGKILL) skips
+    those — `except` only catches Python exceptions — leaving the keyword
+    stuck in_progress forever, polluting the pool and misrepresenting "what
+    we're working on". No single article run exceeds ~1h, so any in_progress
+    older than `older_than_hours` is dead; return it to the pool. Runs once
+    at the start of each article cron — cheap, idempotent, site-scoped."""
+    with get_db_connection(autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(
+            "update keywords set status='planned' "
+            "where site_id=%s and status='in_progress' "
+            "  and (last_used_at is null or last_used_at < now() - %s * interval '1 hour')",
+            (str(site_id), older_than_hours),
+        )
+        n = cur.rowcount or 0
+    if n:
+        log(f"  ♻️  reaped {n} stale in_progress keyword(s) (> {older_than_hours}h) → planned")
+    return n
+
+
 def _link_article_keyword(article_id: UUID, keyword_id: UUID) -> None:
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -330,6 +354,10 @@ def run_one_article(
         "site_id": str(site_id),
         "stages": [],
     }
+
+    # Self-heal any zombie in_progress keywords left by a hard-killed prior
+    # run BEFORE we select — so they're back in the pool and eligible again.
+    _reap_stale_in_progress(site_id, log=log)
 
     # ------------------------------------------------------ Step 1: select
     log("\n=== Step 1: KeywordSelectorAgent ===")
