@@ -337,6 +337,20 @@ jobs:
           done
           echo "✓ pushed content batch to pixelmatch-site"
 
+      # ---------------------------------------------------------------- 6b.
+      # QDF P2: inbound topic-cluster links from established articles → today's
+      # fresh trend pages. Safe: only links where the old body already mentions
+      # the topic; idempotent; anchor-diversity capped. Runs before Build.
+      - name: QDF cluster linking (inbound → fresh trend pages)
+        if: steps.budget.outputs.action != 'pause_all'
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SITE_REPO_PATH: ${{ github.workspace }}/pixelmatch-site
+        run: python -m scripts.qdf_cluster --site pixelmatch.art --apply
+
       # ---------------------------------------------------------------- 7.
       - name: Setup Node 22
         if: env.skip_deploy != 'true'
