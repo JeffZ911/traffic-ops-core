@@ -26,18 +26,39 @@ from src.db.client import get_db_connection
 
 
 def save_qdf_learning(
-    site_id: UUID | str, retrospective: str, guidance: str, *, model: str = ""
+    site_id: UUID | str, retrospective: str, guidance: str, *,
+    model: str = "", summary: str = "",
 ) -> None:
-    """Persist one day's AI retrospective + forward guidance."""
+    """Persist one day's AI retrospective + forward guidance (+ the full
+    human-readable digest, which the dashboard panel renders)."""
     store_raw(
         site_id, "gsc", date.today(),
         {"qdf_learning": {
             "retrospective": retrospective[:4000],
             "guidance": guidance[:4000],
+            "summary": summary[:8000],
             "model": model,
             "date": date.today().isoformat(),
         }},
     )
+
+
+def latest_qdf_report(site_id: UUID | str) -> Optional[dict]:
+    """Full latest qdf_learning payload (summary/retrospective/guidance/date)
+    for the dashboard QDF panel. None if none stored yet."""
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            select payload->'qdf_learning'
+              from metrics_raw
+             where site_id = %s and source = 'gsc' and payload ? 'qdf_learning'
+             order by metric_date desc, id desc
+             limit 1
+            """,
+            (str(site_id),),
+        )
+        row = cur.fetchone()
+    return row[0] if row and row[0] else None
 
 
 def latest_qdf_guidance(site_id: UUID | str) -> Optional[str]:

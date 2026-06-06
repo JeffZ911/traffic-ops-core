@@ -29,7 +29,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from src.db.client import get_db_connection
-from src.utils.ops_tasks import upsert_open_task
+from src.utils.ops_tasks import resolve_open_task
+from src.utils.qdf_memory import save_qdf_learning
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -90,10 +91,9 @@ Return ONLY a JSON object (no fence):
 def _ai_retrospect(site: str, site_id: str, records: list[dict], model: str) -> str:
     """Gemini analyses performance → forward guidance; store it so the next
     trend generation reads it (the self-improvement loop). Returns a markdown
-    block to append to the /todos card."""
+    block, plus (retro, guidance) for the caller to persist."""
     import json
     from src.utils.llm import get_llm_provider
-    from src.utils.qdf_memory import save_qdf_learning
 
     provider = get_llm_provider("gemini")
     prompt = _AI_PROMPT.format(site=site, data=json.dumps(records, ensure_ascii=False))
@@ -112,11 +112,11 @@ def _ai_retrospect(site: str, site_id: str, records: list[dict], model: str) -> 
     retro = (obj.get("retrospective") or "").strip()
     guidance = (obj.get("guidance") or "").strip()
     if not guidance:
-        print("  ⚠️  AI returned no guidance"); return ""
-    save_qdf_learning(site_id, retro, guidance, model=model)
-    print(f"  🤖 AI guidance saved (model={model}, cost ${resp.cost_usd:.4f})")
-    return (f"\n— — — AI 复盘({model})— — —\n"
-            f"【复盘】{retro}\n\n【明日选词指导(已注入下次生成)】\n{guidance}\n")
+        print("  ⚠️  AI returned no guidance"); return "", "", ""
+    print(f"  🤖 AI retrospect done (model={model}, cost ${resp.cost_usd:.4f})")
+    block = (f"\n— — — AI 复盘({model})— — —\n"
+             f"【复盘】{retro}\n\n【明日选词指导(已注入下次生成)】\n{guidance}\n")
+    return block, retro, guidance
 
 
 def main() -> int:
@@ -211,10 +211,11 @@ def main() -> int:
     # forward guidance that the NEXT trend generation reads (qdf_memory). This
     # is the channel that lets learning flow → keywords auto-iterate toward the
     # objective (impressions first, then clicks).
-    ai_block = ""
+    ai_block, retro, guidance = "", "", ""
     if not args.no_ai:
         try:
-            ai_block = _ai_retrospect(args.site, site_id, records, args.model)
+            ai_block, retro, guidance = _ai_retrospect(
+                args.site, site_id, records, args.model)
         except Exception as e:  # noqa: BLE001 — never let the AI step break the report
             print(f"  ⚠️  AI analyst skipped: {type(e).__name__}: {str(e)[:120]}")
 
@@ -233,12 +234,13 @@ def main() -> int:
     if ai_block:
         body_md += ai_block
 
-    upsert_open_task(
-        f"QDF 次日复盘 — {args.site}",
-        body_md,
-        priority="low", category="qdf-report", site_domain=args.site,
-    )
-    print(f"  ✓ /todos card updated (QDF 次日复盘 — {args.site})")
+    # This is an AUTOMATED report, not a human action item — it lives on the
+    # dashboard QDF panel (metrics_raw), NOT in /todos. Persist once (guidance
+    # is what the next trend generation reads; summary is what the panel shows).
+    save_qdf_learning(site_id, retro, guidance, model=args.model, summary=body_md)
+    # Retire any legacy /todos card from when this was (wrongly) an action item.
+    resolve_open_task(f"QDF 次日复盘 — {args.site}", site_domain=args.site)
+    print(f"  ✓ QDF report stored to dashboard panel (not /todos)")
     return 0
 
 
