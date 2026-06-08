@@ -1,0 +1,72 @@
+name: Content Pipeline (imade4u.com — Shopify blog)
+# imade4u is a Shopify store; this tenant publishes QDF-generated gift guides
+# straight into its Shopify blog via the Admin API (no Astro, no CF Pages, no
+# site repo). The content brain is the same as the other sites — only the
+# publish hop differs (scripts/content_imade4u.py → Shopify).
+#
+# Quality: each article is a DISTINCT, image-rich gift guide that links REAL
+# store products (build_article scrubs fake links); a QA gate enforces length +
+# real-link count + title-dedup, so the old thin/duplicate pattern can't recur.
+#
+# Publishes LIVE (drafts don't get indexed → no SEO). Modest cadence (2/day).
+# To review before going live instead, drop `--live` from the generate step.
+
+on:
+  schedule:
+    - cron: '0 9 * * *'    # daily 09:00 UTC — 2 gift guides/day
+  workflow_dispatch:
+    inputs:
+      count:
+        description: "articles to generate"
+        default: "2"
+      live:
+        description: "publish live (true) or draft (false)"
+        default: "true"
+
+concurrency:
+  group: content-imade4u
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install deps
+        run: pip install -e .
+
+      - name: Generate gift guides → Shopify blog
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          IMADE4U_SHOPIFY_DOMAIN: ${{ secrets.IMADE4U_SHOPIFY_DOMAIN }}
+          IMADE4U_SHOPIFY_ADMIN_TOKEN: ${{ secrets.IMADE4U_SHOPIFY_ADMIN_TOKEN }}
+          IMADE4U_SHOPIFY_API_VERSION: ${{ secrets.IMADE4U_SHOPIFY_API_VERSION }}
+        run: |
+          COUNT="${{ github.event.inputs.count || '2' }}"
+          if [ "${{ github.event.inputs.live || 'true' }}" = "false" ]; then
+            python -m scripts.content_imade4u --count "$COUNT"
+          else
+            python -m scripts.content_imade4u --count "$COUNT" --live
+          fi
+
+      - name: Collect imade4u GSC/GA4 metrics
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+          IMADE4U_GA4_PROPERTY_ID: ${{ secrets.IMADE4U_GA4_PROPERTY_ID }}
+        run: python -m scripts.run_collectors --source gsc
