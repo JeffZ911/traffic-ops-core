@@ -19,6 +19,8 @@ dependencies = [
     "google-auth-oauthlib>=1.2",
     "google-analytics-data>=0.18",
     "google-api-python-client>=2.130",
+    # Markdown → HTML for the Shopify Blog publish adapter (imade4u tenant)
+    "markdown>=3.5",
 ]
 
 [project.optional-dependencies]
