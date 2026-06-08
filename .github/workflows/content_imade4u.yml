@@ -13,12 +13,12 @@ name: Content Pipeline (imade4u.com — Shopify blog)
 
 on:
   schedule:
-    - cron: '0 9 * * *'    # daily 09:00 UTC — 2 gift guides/day
+    - cron: '0 9 * * *'    # daily 09:00 UTC — 3 gift guides/day
   workflow_dispatch:
     inputs:
       count:
         description: "articles to generate"
-        default: "2"
+        default: "3"
       live:
         description: "publish live (true) or draft (false)"
         default: "true"
@@ -42,6 +42,15 @@ jobs:
       - name: Install deps
         run: pip install -e .
 
+      - name: Keyword top-up (seasonal QDF + evergreen)
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python -m scripts.gift_keywords --min-planned 12
+
       - name: Generate gift guides → Shopify blog
         continue-on-error: true
         env:
@@ -53,7 +62,7 @@ jobs:
           IMADE4U_SHOPIFY_ADMIN_TOKEN: ${{ secrets.IMADE4U_SHOPIFY_ADMIN_TOKEN }}
           IMADE4U_SHOPIFY_API_VERSION: ${{ secrets.IMADE4U_SHOPIFY_API_VERSION }}
         run: |
-          COUNT="${{ github.event.inputs.count || '2' }}"
+          COUNT="${{ github.event.inputs.count || '3' }}"
           if [ "${{ github.event.inputs.live || 'true' }}" = "false" ]; then
             python -m scripts.content_imade4u --count "$COUNT"
           else
