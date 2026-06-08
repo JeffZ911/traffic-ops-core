@@ -96,6 +96,61 @@ def _embed_product_images(body_md: str, by_handle: dict) -> str:
     return "\n".join(out_lines)
 
 
+def build_article(topic: str, match: list[str], extra_tags: list[str] | None = None,
+                  model: str = "gemini-3.1-pro-preview") -> dict | None:
+    """Generate one gift-guide article (no publish). Returns a dict with the
+    finished body (real product links + inline product photos), SEO fields,
+    hero image, and metrics — or None on failure. Reused by the CLI sample and
+    the content_imade4u pipeline."""
+    prods = _products([m for m in match if m])
+    if not prods:
+        return None
+    by_handle = {p["handle"]: p for p in prods}
+    plist = "\n".join(f"  - {p['title']} — {p['handle']}" for p in prods)
+    prompt = PROMPT.format(topic=topic, products=plist)
+
+    # A full ~1300-word body inside a JSON field is token-heavy; give Pro room
+    # and retry once if the response truncates / isn't valid JSON.
+    obj = resp = None
+    for attempt in range(2):
+        resp = get_llm_provider("gemini").generate(
+            prompt=prompt, model=model, max_tokens=10000, temperature=0.6, json_mode=True)
+        text = (resp.text or "").strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
+        i, j = text.find("{"), text.rfind("}")
+        try:
+            obj = json.loads(text[i:j + 1]); break
+        except Exception:
+            obj = None
+    if obj is None:
+        return None
+
+    # strip any product link whose handle isn't real (anti-fabrication)
+    real = set(by_handle)
+    def _scrub(m):
+        h = m.group(2).rstrip("/").split("/")[-1]
+        return m.group(0) if h in real else m.group(1)
+    body = re.sub(r"\[([^\]]+)\]\(https://imade4u\.com/products/([^)]+)\)", _scrub, obj["body_md"])
+    body = _embed_product_images(body, by_handle)
+    hero = next((by_handle[h]["image"] for h in re.findall(r"/products/([a-z0-9-]+)", body)
+                 if by_handle.get(h, {}).get("image")), None)
+
+    return {
+        "title": obj["title"],
+        "body_md": body,
+        "meta_title": obj.get("meta_title"),
+        "meta_description": obj.get("meta_description"),
+        "summary": obj.get("summary"),
+        "tags": [t for t in (extra_tags or []) if t] + obj.get("tags", []),
+        "hero": hero,
+        "cost_usd": float(resp.cost_usd or 0),
+        "n_product_links": len(set(re.findall(r"/products/([a-z0-9-]+)", body))),
+        "n_images": body.count("!["),
+        "word_count": len(re.findall(r"[A-Za-z']+", re.sub(r"!\[[^\]]*\]\([^)]*\)", "", body))),
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--topic", required=True)
@@ -104,55 +159,17 @@ def main() -> int:
     ap.add_argument("--model", default="gemini-3.1-pro-preview")
     args = ap.parse_args()
 
-    prods = _products([m for m in args.match.split(",") if m])
-    if not prods:
-        print("⚠️  no matching products found"); return 1
-    by_handle = {p["handle"]: p for p in prods}
-    plist = "\n".join(f"  - {p['title']} — {p['handle']}" for p in prods)
-    prompt = PROMPT.format(topic=args.topic, products=plist)
-
-    # A full ~1300-word body inside a JSON field is token-heavy; give Pro room
-    # and retry once if the response truncates / isn't valid JSON.
-    obj = None
-    for attempt in range(2):
-        resp = get_llm_provider("gemini").generate(
-            prompt=prompt, model=args.model, max_tokens=10000, temperature=0.6, json_mode=True)
-        text = (resp.text or "").strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
-        i, j = text.find("{"), text.rfind("}")
-        try:
-            obj = json.loads(text[i:j + 1]); break
-        except Exception as e:
-            print(f"   ⚠️  JSON parse attempt {attempt+1} failed ({type(e).__name__})"
-                  + ("; retrying" if attempt == 0 else "; giving up"))
-    if obj is None:
-        return 1
-
-    # safety: strip any product links whose handle isn't real
-    real = set(by_handle)
-    def _scrub(m):
-        h = m.group(2).rstrip("/").split("/")[-1]
-        return m.group(0) if h in real else m.group(1)  # keep text, drop bad link
-    body = re.sub(r"\[([^\]]+)\]\(https://imade4u\.com/products/([^)]+)\)", _scrub, obj["body_md"])
-
-    # embed real product photos inline; hero = first linked product's image
-    body = _embed_product_images(body, by_handle)
-    hero = next((by_handle[h]["image"] for h in re.findall(r"/products/([a-z0-9-]+)", body)
-                 if by_handle.get(h, {}).get("image")), None)
-
+    a = build_article(args.topic, args.match.split(","),
+                      [t for t in args.tag.split(",") if t], args.model)
+    if not a:
+        print("⚠️  generation failed (no products / unparseable)"); return 1
     r = publish_article(
-        title=obj["title"], content_md=body,
-        tags=[t for t in (args.tag.split(",") if args.tag else []) if t] + obj.get("tags", []),
-        summary=obj.get("summary"), meta_title=obj.get("meta_title"),
-        meta_description=obj.get("meta_description"),
-        image_url=hero, image_alt=obj["title"], published=False)
-    nlinks = len(re.findall(r"\(https://imade4u\.com/products/", body))
-    nimgs = body.count("![")
-    print(f"  ✓ DRAFT created: {obj['title']}")
-    words = len(re.findall(r"[A-Za-z']+", re.sub(r"!\[[^\]]*\]\([^)]*\)", "", body)))
-    print(f"    words≈{words}  product links: {nlinks}  "
-          f"images: {nimgs} (+1 hero)  cost ${resp.cost_usd:.4f}")
+        title=a["title"], content_md=a["body_md"], tags=a["tags"], summary=a["summary"],
+        meta_title=a["meta_title"], meta_description=a["meta_description"],
+        image_url=a["hero"], image_alt=a["title"], published=False)
+    print(f"  ✓ DRAFT created: {a['title']}")
+    print(f"    words≈{a['word_count']}  product links: {a['n_product_links']}  "
+          f"images: {a['n_images']} (+1 hero)  cost ${a['cost_usd']:.4f}")
     print(f"    review: {r.admin_url}")
     return 0
 
