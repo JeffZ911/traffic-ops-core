@@ -36,8 +36,8 @@ from src.utils.ops_tasks import upsert_open_task, resolve_open_task
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-DEFAULT_SITES = ("ntecodex.com", "pixelmatch.art", "quvii.com")
-CAP_PER_SITE = 4   # GSC allows ~10-12/day/property; 4 is a 1-min task, easy to finish.
+DEFAULT_SITES = ("ntecodex.com", "pixelmatch.art", "quvii.com", "imade4u.com")
+CAP_PER_SITE = 8   # GSC allows ~10-12/day/property; 8 = aggressive indexing push.
 TIER_RANK = {"clean": 0, "note": 1, "strong": 2}
 
 
