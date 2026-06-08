@@ -59,11 +59,13 @@ Reply ONLY with a JSON object (no fence):
 """
 
 
-def _products(match: list[str], limit: int = 12) -> list[tuple[str, str]]:
+def _products(match: list[str], limit: int = 12) -> list[dict]:
+    """Active products matching any keyword → [{title, handle, image}]. Real
+    product photos (Shopify CDN) are used as article images — on-brand, no AI."""
     dom = os.getenv("IMADE4U_SHOPIFY_DOMAIN"); tok = os.getenv("IMADE4U_SHOPIFY_ADMIN_TOKEN")
     ver = os.getenv("IMADE4U_SHOPIFY_API_VERSION", "2026-04")
     req = urllib.request.Request(
-        f"https://{dom}/admin/api/{ver}/products.json?limit=250&fields=title,handle,product_type,tags,status",
+        f"https://{dom}/admin/api/{ver}/products.json?limit=250&fields=title,handle,product_type,tags,status,image",
         headers={"X-Shopify-Access-Token": tok})
     prods = json.load(urllib.request.urlopen(req, timeout=30))["products"]
     out = []
@@ -72,10 +74,26 @@ def _products(match: list[str], limit: int = 12) -> list[tuple[str, str]]:
             continue
         hay = f"{p.get('title','')} {p.get('product_type','')} {p.get('tags','')}".lower()
         if any(m.strip().lower() in hay for m in match):
-            out.append((p["title"], p["handle"]))
+            out.append({"title": p["title"], "handle": p["handle"],
+                        "image": (p.get("image") or {}).get("src")})
         if len(out) >= limit:
             break
     return out
+
+
+def _embed_product_images(body_md: str, by_handle: dict) -> str:
+    """After each gift-idea's product link, drop that product's real photo —
+    turns the guide into a visual, conversion-friendly gift list."""
+    used: set[str] = set()
+    out_lines = []
+    for line in body_md.splitlines():
+        out_lines.append(line)
+        for h in re.findall(r"/products/([a-z0-9-]+)", line):
+            p = by_handle.get(h)
+            if p and p.get("image") and h not in used:
+                used.add(h)
+                out_lines.append(f"\n![{p['title']}]({p['image']})\n")
+    return "\n".join(out_lines)
 
 
 def main() -> int:
@@ -89,32 +107,52 @@ def main() -> int:
     prods = _products([m for m in args.match.split(",") if m])
     if not prods:
         print("⚠️  no matching products found"); return 1
-    plist = "\n".join(f"  - {t} — {h}" for t, h in prods)
+    by_handle = {p["handle"]: p for p in prods}
+    plist = "\n".join(f"  - {p['title']} — {p['handle']}" for p in prods)
     prompt = PROMPT.format(topic=args.topic, products=plist)
 
-    resp = get_llm_provider("gemini").generate(
-        prompt=prompt, model=args.model, max_tokens=6000, temperature=0.6, json_mode=True)
-    text = (resp.text or "").strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
-    i, j = text.find("{"), text.rfind("}")
-    obj = json.loads(text[i:j + 1])
+    # A full ~1300-word body inside a JSON field is token-heavy; give Pro room
+    # and retry once if the response truncates / isn't valid JSON.
+    obj = None
+    for attempt in range(2):
+        resp = get_llm_provider("gemini").generate(
+            prompt=prompt, model=args.model, max_tokens=10000, temperature=0.6, json_mode=True)
+        text = (resp.text or "").strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
+        i, j = text.find("{"), text.rfind("}")
+        try:
+            obj = json.loads(text[i:j + 1]); break
+        except Exception as e:
+            print(f"   ⚠️  JSON parse attempt {attempt+1} failed ({type(e).__name__})"
+                  + ("; retrying" if attempt == 0 else "; giving up"))
+    if obj is None:
+        return 1
 
     # safety: strip any product links whose handle isn't real
-    real = {h for _, h in prods}
+    real = set(by_handle)
     def _scrub(m):
         h = m.group(2).rstrip("/").split("/")[-1]
         return m.group(0) if h in real else m.group(1)  # keep text, drop bad link
     body = re.sub(r"\[([^\]]+)\]\(https://imade4u\.com/products/([^)]+)\)", _scrub, obj["body_md"])
 
+    # embed real product photos inline; hero = first linked product's image
+    body = _embed_product_images(body, by_handle)
+    hero = next((by_handle[h]["image"] for h in re.findall(r"/products/([a-z0-9-]+)", body)
+                 if by_handle.get(h, {}).get("image")), None)
+
     r = publish_article(
         title=obj["title"], content_md=body,
         tags=[t for t in (args.tag.split(",") if args.tag else []) if t] + obj.get("tags", []),
         summary=obj.get("summary"), meta_title=obj.get("meta_title"),
-        meta_description=obj.get("meta_description"), published=False)
+        meta_description=obj.get("meta_description"),
+        image_url=hero, image_alt=obj["title"], published=False)
     nlinks = len(re.findall(r"\(https://imade4u\.com/products/", body))
+    nimgs = body.count("![")
     print(f"  ✓ DRAFT created: {obj['title']}")
-    print(f"    words≈{len(re.findall(r'\\w+', body))}  product links: {nlinks}  cost ${resp.cost_usd:.4f}")
+    words = len(re.findall(r"[A-Za-z']+", re.sub(r"!\[[^\]]*\]\([^)]*\)", "", body)))
+    print(f"    words≈{words}  product links: {nlinks}  "
+          f"images: {nimgs} (+1 hero)  cost ${resp.cost_usd:.4f}")
     print(f"    review: {r.admin_url}")
     return 0
 
