@@ -186,7 +186,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           if [ "$(date -u +%H)" = "07" ]; then
-            python -m scripts.keyword_gardener --trending --target 5
+            python -m scripts.keyword_gardener --trending --target 8
           else
             echo "skip — trend scan runs once/day at 07:00 UTC (now $(date -u +%H):00)"
           fi

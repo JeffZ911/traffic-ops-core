@@ -61,25 +61,31 @@ def _upcoming(today: date, horizon_weeks: int = 8) -> list[str]:
 
 PROMPT = """You are an SEO content planner for iMade4U, a store of PERSONALIZED
 gifts. Generate {n} DISTINCT, specific gift-guide blog topics — each a unique
-angle (by occasion, recipient, product type, or theme). NEVER near-duplicates.
+angle (occasion, recipient, product type, or REAL-TIME TREND). No near-dupes.
 
 Ground every topic in these real product categories:
   {cats}
 
+USE GOOGLE SEARCH to weave in what is ACTUALLY TRENDING RIGHT NOW in gifting
+(last ~30 days): viral / TikTok-famous personalized gift types, pop-culture or
+news-driven gifting moments, "{year} gift trends", surging gift searches. Make
+~1/3 of the topics these real, current trends (mark them type=occasion_guide or
+buying_guide, priority 80-90). Only use a trend you can back with a real source.
+
 {seasonal}
 
-Use these pillars (article_type): occasion_guide, recipient_guide, pet_memorial,
+Pillars (article_type): occasion_guide, recipient_guide, pet_memorial,
 sympathy_guide, buying_guide, how_to.
 
 Do NOT duplicate these existing topics (case-insensitive):
 {existing}
 
-Reply ONLY with a JSON array (no fence), each element:
+Reply ONLY with a JSON array (no markdown fence), each element:
 {{"title": "<specific blog title, 50-70 chars>",
   "type": "<one pillar>",
   "match": "<2-4 comma product keywords to pick relevant products>",
   "tags": "<2-4 comma article tags, lowercase-hyphen>",
-  "priority": <integer 60-90; seasonal/high-intent higher>}}
+  "priority": <integer 60-90; trending/seasonal/high-intent higher>}}
 """
 
 
@@ -111,10 +117,14 @@ def main() -> int:
                 if occ else "No major gift occasion is imminent; focus on evergreen "
                 "pillars (pet memorial, sympathy, recipient, buying guides).")
     prompt = PROMPT.format(n=args.target, cats=PRODUCT_CATS, seasonal=seasonal,
+                           year=date.today().year,
                            existing="\n".join(f"  - {k}" for k in existing[:50]) or "  (none)")
 
+    # enable_search → real current gift trends (grounding forces json_mode off;
+    # the parse below handles fenced / array output).
     resp = get_llm_provider("gemini").generate(
-        prompt=prompt, model=args.model, max_tokens=4000, temperature=0.7, json_mode=True)
+        prompt=prompt, model=args.model, max_tokens=4000, temperature=0.7,
+        json_mode=False, enable_search=True)
     text = (resp.text or "").strip()
     if text.startswith("```"):
         text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
