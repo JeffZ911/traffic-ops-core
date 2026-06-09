@@ -83,7 +83,7 @@ Do NOT duplicate these existing topics (case-insensitive):
 Reply ONLY with a JSON array (no markdown fence), each element:
 {{"title": "<specific blog title, 50-70 chars>",
   "type": "<one pillar>",
-  "match": "<2-4 comma product keywords to pick relevant products>",
+  "match": "<2-4 SHORT single-word product nouns to pick products, e.g. necklace, mug, keychain — NOT phrases like 'custom photo mug'>",
   "tags": "<2-4 comma article tags, lowercase-hyphen>",
   "priority": <integer 60-90; trending/seasonal/high-intent higher>}}
 """

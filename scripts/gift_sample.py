@@ -68,12 +68,22 @@ def _products(match: list[str], limit: int = 12) -> list[dict]:
         f"https://{dom}/admin/api/{ver}/products.json?limit=250&fields=title,handle,product_type,tags,status,image",
         headers={"X-Shopify-Access-Token": tok})
     prods = json.load(urllib.request.urlopen(req, timeout=30))["products"]
+    # Robust matching: a `match` entry may be a phrase ("custom photo mugs");
+    # reduce to distinctive product tokens (≥4 chars, non-generic, singularized)
+    # so "custom photo mugs" still finds a "Custom Mug".
+    _GEN = {"custom", "personalized", "photo", "gift", "gifts", "best", "unique",
+            "the", "for", "and", "with", "your", "ideas"}
+    toks = set()
+    for m in match:
+        for w in re.findall(r"[a-z]+", m.lower()):
+            if len(w) >= 4 and w not in _GEN:
+                toks.add(w); toks.add(w.rstrip("s"))  # singular + plural
     out = []
     for p in prods:
         if p.get("status") != "active":
             continue
         hay = f"{p.get('title','')} {p.get('product_type','')} {p.get('tags','')}".lower()
-        if any(m.strip().lower() in hay for m in match):
+        if any(t in hay for t in toks):
             out.append({"title": p["title"], "handle": p["handle"],
                         "image": (p.get("image") or {}).get("src")})
         if len(out) >= limit:
