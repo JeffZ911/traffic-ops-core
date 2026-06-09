@@ -85,6 +85,7 @@ Reply ONLY with a JSON array (no markdown fence), each element:
   "type": "<one pillar>",
   "match": "<2-4 SHORT single-word product nouns to pick products, e.g. necklace, mug, keychain — NOT phrases like 'custom photo mug'>",
   "tags": "<2-4 comma article tags, lowercase-hyphen>",
+  "is_trend": <true if this is a REAL-TIME/viral/news/cultural trend; false for evergreen or fixed-calendar topics>,
   "priority": <integer 60-90; trending/seasonal/high-intent higher>}}
 """
 
@@ -120,6 +121,19 @@ def main() -> int:
                            year=date.today().year,
                            existing="\n".join(f"  - {k}" for k in existing[:50]) or "  (none)")
 
+    # Self-improvement loop: inject the latest AI guidance (from qdf_report's
+    # retrospective on how imade4u's trend pages performed) so topic selection
+    # learns what actually wins traffic.
+    try:
+        from src.utils.qdf_memory import latest_qdf_guidance
+        g = latest_qdf_guidance(site_id)
+        if g:
+            prompt += ("\n\nLEARNINGS FROM OUR RECENT PERFORMANCE (apply these — "
+                       "derived from how our last gift trend posts actually did):\n" + g + "\n")
+            print("   🧠 injected prior QDF guidance")
+    except Exception:
+        pass
+
     # enable_search → real current gift trends (grounding forces json_mode off;
     # the parse below handles fenced / array output).
     resp = get_llm_provider("gemini").generate(
@@ -137,8 +151,8 @@ def main() -> int:
         data = next((v for v in data.values() if isinstance(v, list)), [])
 
     have = {k.lower() for k in existing}
-    src = "gift_seasonal" if occ else "gift_topup"
-    inserted = 0
+    nonrend = "gift_seasonal" if occ else "gift_topup"
+    inserted = ntrend = 0
     valid_types = {"occasion_guide", "recipient_guide", "pet_memorial",
                    "sympathy_guide", "buying_guide", "how_to"}
     with get_db_connection(autocommit=True) as conn, conn.cursor() as cur:
@@ -149,15 +163,21 @@ def main() -> int:
             atype = it.get("type") if it.get("type") in valid_types else "buying_guide"
             if not title or title.lower() in have or not it.get("match"):
                 continue
+            # Real-time trends → source='trend' so qdf_report tracks them and
+            # the AI retrospective loop can learn from their performance.
+            row_src = "trend" if it.get("is_trend") else nonrend
             notes = f"type={atype}|match={it.get('match')}|tags={it.get('tags','personalized-gifts')}"
             cur.execute(
                 "insert into keywords (site_id, keyword, intent, priority_score, source, notes, status) "
                 "values (%s,%s,'commercial',%s,%s,%s,'planned') on conflict (site_id, keyword) do nothing",
-                (site_id, title, int(it.get("priority") or 65), src, notes))
+                (site_id, title, int(it.get("priority") or 65), row_src, notes))
             if cur.rowcount:
-                inserted += 1; have.add(title.lower())
-    print(f"  ✓ imade4u top-up: +{inserted} topics "
-          f"({'seasonal: '+', '.join(occ) if occ else 'evergreen'}) cost ${resp.cost_usd:.4f}")
+                inserted += 1
+                if row_src == "trend":
+                    ntrend += 1
+                have.add(title.lower())
+    print(f"  ✓ imade4u top-up: +{inserted} topics ({ntrend} real-time trend, "
+          f"{'seasonal: '+', '.join(occ) if occ else 'evergreen'}) cost ${resp.cost_usd:.4f}")
     return 0
 
 
