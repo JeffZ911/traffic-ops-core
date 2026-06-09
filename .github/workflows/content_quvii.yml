@@ -195,10 +195,11 @@ jobs:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           GEMINI_API_KEY: ${{ secrets.QUVII_GEMINI_API_KEY }}
         run: |
-          if [ "$(date -u +%H)" = "03" ]; then
+          H="$(date -u +%H)"
+          if [ "$H" = "03" ] || [ "$H" = "15" ]; then
             python -m scripts.keyword_gardener --trending --target 8
           else
-            echo "skip — trend scan runs once/day at 03:00 UTC (now $(date -u +%H):00)"
+            echo "skip — trend scan runs at 03:00 & 15:00 UTC (now ${H}:00)"
           fi
 
       # ---------------------------------------------------------------- 2b.
