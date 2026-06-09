@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import urllib.request
 from datetime import date
 from pathlib import Path
 
@@ -78,14 +79,32 @@ def _ordered_candidates(cur, site_id: str, domain: str) -> list[str]:
     return out
 
 
-def _rotating_window(urls: list[str], cap: int, day_ordinal: int) -> list[str]:
-    """Pick `cap` urls, rotating the start by the day so consecutive days
-    surface a different slice and the operator cycles through the backlog."""
+def _live_url(base: str, timeout: float = 8.0) -> str | None:
+    """Return the form of `base` that serves 200 DIRECTLY (no redirect), or None
+    if dead. Astro needs a trailing slash (no-slash 308s); Shopify needs none.
+    GSC can't index a URL that 404s or only redirects, so we never list one."""
+    base = base.rstrip("/")
+    for cand in (base + "/", base):
+        try:
+            req = urllib.request.Request(
+                cand, method="HEAD",
+                headers={"User-Agent": "Mozilla/5.0 (indexing-worklist)"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                if r.status == 200 and r.geturl() == cand:
+                    return cand
+        except Exception:
+            continue
+    return None
+
+
+def _rotate(urls: list[str], day_ordinal: int, cap: int) -> list[str]:
+    """Full list rotated by the day so each run starts at a different offset
+    (so the operator cycles through the whole backlog over time)."""
     n = len(urls)
-    if n <= cap:
-        return urls
+    if n == 0:
+        return []
     start = (day_ordinal * cap) % n
-    return [urls[(start + i) % n] for i in range(cap)]
+    return urls[start:] + urls[:start]
 
 
 def build_site_card(cur, domain: str, cap: int, day_ordinal: int) -> str:
@@ -99,20 +118,35 @@ def build_site_card(cur, domain: str, cap: int, day_ordinal: int) -> str:
         resolve_open_task(f"每日 Request indexing — {domain}", site_domain=domain)
         return f"{domain}: no published URLs — card cleared"
 
-    picks = _rotating_window(candidates, cap, day_ordinal)
+    # Walk the rotated backlog, keeping only URLs that are actually LIVE (200) —
+    # skips stale DB rows that were never deployed + redirect-only forms.
+    picks, checked, dead = [], 0, 0
+    for base in _rotate(candidates, day_ordinal, cap):
+        if len(picks) >= cap or checked >= cap * 6:
+            break
+        checked += 1
+        live = _live_url(base)
+        if live:
+            picks.append(live)
+        else:
+            dead += 1
+    if not picks:
+        resolve_open_task(f"每日 Request indexing — {domain}", site_domain=domain)
+        return f"{domain}: no LIVE URLs in {checked} checked — card cleared"
     numbered = "\n".join(f"  {i+1}. {u}" for i, u in enumerate(picks))
     detail = (
         f"{len(picks)} 个 URL → 粘进 GSC 请求收录（每天轮换一批，做完标记 Done）。\n"
         "操作：点每条右边的 📋 复制 或 'GSC ↗' 直接打开对应站点的 URL Inspection → "
-        "Request Indexing。GSC 每站每天约 10-12 个配额，这 4 个 2 分钟搞定。\n\n"
-        f"URLs（编辑精华 + 最新优先）:\n{numbered}"
+        "Request Indexing。GSC 每站每天约 10-12 个配额，这几个 2 分钟搞定。\n"
+        "（已自动校验：只列实时返回 200 的页面，跳过 404/重定向）\n\n"
+        f"URLs（编辑精华 + 最新优先，均已验活）:\n{numbered}"
     )
     res = upsert_open_task(
         f"每日 Request indexing — {domain}",
         detail,
         priority="high", category="seo-reqidx", site_domain=domain,
     )
-    return f"{domain}: {res} ({len(picks)}/{len(candidates)} urls)"
+    return f"{domain}: {res} ({len(picks)} live / {checked} checked, {dead} dead skipped)"
 
 
 def main() -> int:
