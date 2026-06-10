@@ -62,8 +62,13 @@ def latest_qdf_report(site_id: UUID | str) -> Optional[dict]:
 
 
 def latest_qdf_guidance(site_id: UUID | str) -> Optional[str]:
-    """Most-recent stored guidance for the site, or None. Injected into the
-    next trend prompt so each generation builds on what actually performed."""
+    """Most-recent NON-EMPTY stored guidance for the site, or None. Injected
+    into the next trend prompt so each generation builds on what performed.
+
+    Must filter to non-empty: when the AI analyst is skipped (e.g. missing
+    API key) the report still stores a row with guidance='' for the dashboard
+    digest — without the filter, those daily empty rows permanently shadow
+    the last real guidance (quvii's good 06-06 guidance was invisible)."""
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
@@ -71,6 +76,7 @@ def latest_qdf_guidance(site_id: UUID | str) -> Optional[str]:
               from metrics_raw
              where site_id = %s and source = 'gsc'
                and payload ? 'qdf_learning'
+               and coalesce(payload->'qdf_learning'->>'guidance', '') <> ''
              order by metric_date desc, id desc
              limit 1
             """,

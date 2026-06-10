@@ -285,10 +285,50 @@ SECURITY_TREND_TYPES = [
 ]
 
 
+def _last_trend_scan_hours_ago(site_id: UUID) -> float | None:
+    """Hours since the last trend scan for this site (marker in metrics_raw
+    payload key 'trend_scan'), or None if never scanned."""
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            select extract(epoch from (now() - (payload->'trend_scan'->>'at')::timestamptz))/3600.0
+              from metrics_raw
+             where site_id = %s and payload ? 'trend_scan'
+             order by id desc limit 1
+            """,
+            (str(site_id),),
+        )
+        row = cur.fetchone()
+    return float(row[0]) if row and row[0] is not None else None
+
+
+def _mark_trend_scan(site_id: UUID) -> None:
+    """Persist the trend-scan timestamp marker (append-only, metrics_raw)."""
+    from datetime import date as _date, datetime as _dt, timezone as _tz
+    from src.collectors.base import store_raw
+    store_raw(site_id, "gsc", _date.today(),
+              {"trend_scan": {"at": _dt.now(_tz.utc).isoformat()}})
+
+
 def run_trending(site_id: UUID, config: dict, existing: set[str], args) -> int:
     """Seed time-sensitive 'trend' keywords (source='trend'). KeywordSelector
     gives these a freshness bonus (by created_at) that decays over ~2 weeks,
-    so they get written fast then expire. Returns rows inserted."""
+    so they get written fast then expire. Returns rows inserted.
+
+    SELF-GATING (2026-06-10): the old workflow-side exact-hour gate
+    (`if [ "$H" = "03" ]`) almost never fired — GitHub cron drift of 1.5-4h
+    meant runs rarely started inside the gate hour, so the trend layer was
+    a silent no-op (pixelmatch went 15 days without a trend keyword). The
+    gate now lives HERE: run if the last scan was ≥ --min-interval-hours ago
+    (default 11 → ~2 scans/day across 6 crons), tracked by a DB marker that
+    is immune to scheduler drift. Workflows call this unconditionally."""
+    min_interval = float(getattr(args, "min_interval_hours", 11) or 0)
+    if min_interval > 0:
+        ago = _last_trend_scan_hours_ago(site_id)
+        if ago is not None and ago < min_interval:
+            print(f"   📈 trend scan: skipped — last scan {ago:.1f}h ago "
+                  f"(< {min_interval:.0f}h interval)")
+            return 0
     niche = _niche(config)
     ecom = _is_ecom(config)
     sec = (niche == "security_cameras")
@@ -356,6 +396,10 @@ def run_trending(site_id: UUID, config: dict, existing: set[str], args) -> int:
     # trend keywords seeded that day (QDF day wasted). More headroom + salvage.
     resp = provider.generate(prompt=prompt, model=model, max_tokens=6000,
                              temperature=0.4, json_mode=True, enable_search=True)
+    # Mark the scan now (spend happened) — parse failures below still count
+    # as a scan, so a persistently-bad response can't burn one LLM call per
+    # cron; a provider exception above skips the marker → next cron retries.
+    _mark_trend_scan(site_id)
     try:
         data = json.loads(resp.text.strip())
     except Exception:
@@ -1068,6 +1112,10 @@ def main() -> int:
                         "keywords for rising topics (source='trend'). Runs "
                         "instead of the normal top-up; pair with a daily cron "
                         "slot. KeywordSelector decays their freshness bonus.")
+    p.add_argument("--min-interval-hours", type=float, default=11,
+                   help="Trend mode self-gate: skip if the last scan for this "
+                        "site was less than N hours ago (DB marker, immune to "
+                        "cron drift). 0 disables the gate. Default 11 → ~2/day.")
     args = p.parse_args()
 
     import os

@@ -64,6 +64,9 @@ _AI_PROMPT = """You are the SEO performance analyst for {site}, a young,
 low-authority site running a QDF (Query-Deserves-Freshness) strategy: publish
 timely trend pages fast to win the freshness window.
 
+TODAY'S DATE IS {today}. Anchor all "recent/current/future" judgements to
+this date — e.g. the year {today_year} is NOW, not the distant future.
+
 OUR OBJECTIVE, in order: (1) win IMPRESSIONS first (get crawled + indexed +
 shown), (2) then convert impressions to CLICKS. This is a self-reinforcing
 loop — more impressions → more clicks → more authority → more impressions.
@@ -96,7 +99,10 @@ def _ai_retrospect(site: str, site_id: str, records: list[dict], model: str) -> 
     from src.utils.llm import get_llm_provider
 
     provider = get_llm_provider("gemini")
-    prompt = _AI_PROMPT.format(site=site, data=json.dumps(records, ensure_ascii=False))
+    _today = date.today()
+    prompt = _AI_PROMPT.format(site=site, today=_today.isoformat(),
+                               today_year=_today.year,
+                               data=json.dumps(records, ensure_ascii=False))
     # Pro model emits a thinking step + two prose fields; 1200 truncated the
     # 'guidance' mid-string. 2500 gives both fields room to complete.
     resp = provider.generate(prompt=prompt, model=model, max_tokens=2500,

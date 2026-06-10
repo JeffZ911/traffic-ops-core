@@ -358,6 +358,14 @@ class KeywordSelectorAgent(BaseAgent):
                 t: _type_adjustment(track_record.get(t)) for t in ALL_TYPES
             }
 
+            # Fetch ALL eligible planned keywords (no LIMIT). The old
+            # `limit max(cap*2, 50)` was a silent deadlock: the top-50 by
+            # priority can saturate with permanently-ineligible keywords
+            # (blacklist-guessed types / duplicate topics) that never leave
+            # 'planned', hiding perfectly good candidates below the cutoff —
+            # ntecodex sat at 0 output for 28h with 37 eligible keywords
+            # ranked 51+. Pools are a few hundred rows; fetching all is cheap.
+            # Filtering happens below, then the top `cap` ELIGIBLE are kept.
             cur.execute(
                 """
                 select id, keyword, intent, priority_score, source, notes,
@@ -370,9 +378,8 @@ class KeywordSelectorAgent(BaseAgent):
                         or last_used_at < now() - interval '6 hours')
                  order by priority_score desc nulls last,
                           last_used_at nulls first
-                 limit %s
                 """,
-                (str(site_id), max(cap * 2, 50)),
+                (str(site_id),),
             )
             cand_rows = cur.fetchall()
             if not cand_rows:
@@ -447,6 +454,14 @@ class KeywordSelectorAgent(BaseAgent):
                 return None
 
             candidates: list[dict[str, Any]] = []
+            # Permanently-ineligible keywords (blacklisted-type guess or
+            # duplicate of a published topic) are ARCHIVED, not skipped:
+            # skipping leaves them in 'planned' forever, silently clogging
+            # the pool (and the planned-count signals the gardener's top-up
+            # threshold reads). Both filters are deterministic, so an
+            # ineligible keyword today is ineligible every day.
+            _archive_blacklisted: list[str] = []
+            _archive_duplicate: list[str] = []
             for kid, kw, intent, pri, src, notes, age_days, competition, sv in cand_rows:
                 game_slug = _game_from_notes(notes)
                 # Per-game blacklist (preferred) else fall back to the flat one.
@@ -456,9 +471,11 @@ class KeywordSelectorAgent(BaseAgent):
                 )
                 guessed_type = _guess_type(kw, intent, notes)
                 if guessed_type and guessed_type in effective_blacklist:
+                    _archive_blacklisted.append(str(kid))
                     continue
-                # Skip topics already covered by a published article (dedup).
+                # Topic already covered by a published article (dedup).
                 if _is_duplicate_topic(_topic_signature(kw), published_sigs):
+                    _archive_duplicate.append(str(kid))
                     continue
                 base = float(pri) if pri is not None else 0.0
                 gsc_bonus = GSC_LONGTAIL_BONUS if src == "gsc_longtail" else 0.0
@@ -501,9 +518,29 @@ class KeywordSelectorAgent(BaseAgent):
                         base + gsc_bonus + type_bonus + game_bonus + trend_bonus + comp_bonus, 2
                     ),
                 })
+            # Archive the permanently-ineligible (self-healing: drains the
+            # clogged pool so planned-counts and future runs reflect reality).
+            _to_archive = _archive_blacklisted + _archive_duplicate
+            if _to_archive:
+                cur.execute(
+                    "update keywords set status='archived' where id = any(%s)",
+                    (_to_archive,),
+                )
+                conn.commit()
+                print(
+                    f"  ♻️  archived {len(_to_archive)} permanently-ineligible "
+                    f"planned keyword(s) (blacklisted-type: "
+                    f"{len(_archive_blacklisted)}, duplicate-topic: "
+                    f"{len(_archive_duplicate)})"
+                )
+
             if not candidates:
                 raise RuntimeError(
-                    f"All candidates filtered out by blacklist={type_blacklist}"
+                    f"Keyword pool STARVED for this site: {len(cand_rows)} planned "
+                    f"fetched, {len(_archive_blacklisted)} blacklisted-type and "
+                    f"{len(_archive_duplicate)} duplicate-topic (now archived), "
+                    f"0 eligible remain. Top up the pool (trend scan / gardener / "
+                    f"manual seed) — selection cannot proceed."
                 )
             candidates.sort(key=lambda c: c["priority_with_bonus"], reverse=True)
             candidates = candidates[:cap]

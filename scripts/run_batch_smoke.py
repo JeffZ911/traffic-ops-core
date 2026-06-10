@@ -19,6 +19,7 @@ puts us at ~15-17 published / day.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
@@ -68,6 +69,18 @@ def main() -> int:
     type_floors: dict[str, int] = {
         k: int(v) for k, v in _floors_cfg.items() if isinstance(v, (int, str)) and str(v).isdigit()
     }
+    # A floor on a BLACKLISTED type is a config contradiction that deadlocks
+    # the day: the floor is never met (the type can't be written), so it is
+    # forced on every iteration while the selector filters every matching
+    # candidate out (ntecodex had floors on news/weapon_db/character_db with
+    # all three blacklisted). Drop such floors loudly instead of honoring them.
+    _bl = set((( _cfg or {}).get("content_plan") or {}).get("type_blacklist") or [])
+    _contradictory = sorted(set(type_floors) & _bl)
+    if _contradictory:
+        print(f"⚠️  ignoring article_type_floors on BLACKLISTED types "
+              f"{_contradictory} — floors and type_blacklist contradict; "
+              f"fix sites.config.content_plan for {site_domain}")
+        type_floors = {k: v for k, v in type_floors.items() if k not in _bl}
 
     def _produced_today() -> int:
         """Articles created today (UTC) for this site — any status, since a
@@ -222,6 +235,38 @@ def main() -> int:
         flag = "✅" if st == "qa_passed" else "❌"
         print(f"  {flag} #{r['index']}  [{st}]  {kw!r} ({atype}, {game})  "
               f"score={score} cost=${cost:.4f}")
+
+    # ── DEADMAN (2026-06-10): a batch where EVERY attempted slot crashed is
+    # a production outage, not a quality miss — and it used to hide behind a
+    # green run (ntecodex was silently dead 28h, quvii 66h). Make it loud:
+    # a dashboard alert row (HealthBanner) + a GitHub ::error:: annotation.
+    # Still exit 0 — downstream steps (publish/image/sitemap) must keep
+    # running for the rest of the pipeline; the step must not block them.
+    attempted = len(results)
+    if attempted > 0 and crashed == attempted:
+        msg = (f"PRODUCTION DEADMAN: {site_domain} attempted {attempted} "
+               f"article slot(s), ALL crashed — site is producing nothing. "
+               f"First error: {results[0].get('error', '?')[:160]}")
+        print(f"\n::error title=Content production dead ({site_domain})::{msg}")
+        try:
+            with get_db_connection(autocommit=True) as conn, conn.cursor() as cur:
+                # Dedupe: at most one deadman alert per site per day.
+                cur.execute(
+                    "select 1 from alerts where site_id=%s and source='deadman' "
+                    "and created_at >= date_trunc('day', now() at time zone 'utc') limit 1",
+                    (str(site_id),),
+                )
+                if not cur.fetchone():
+                    cur.execute(
+                        "insert into alerts (site_id, level, source, message, payload) "
+                        "values (%s, 'critical', 'deadman', %s, %s::jsonb)",
+                        (str(site_id), msg,
+                         json.dumps({"attempted": attempted, "crashed": crashed,
+                                     "first_error": results[0].get("error", "")[:300]})),
+                    )
+                    print("  🚨 deadman alert written (dashboard HealthBanner)")
+        except Exception as _e:  # noqa: BLE001 — alerting must never crash the run
+            print(f"  ⚠️  deadman alert insert failed: {type(_e).__name__}")
 
     # Exit 0 always — cron continues to publish/image/deploy steps for
     # any qa_passed articles even if some attempts failed.

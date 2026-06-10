@@ -184,13 +184,9 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: |
-          H="$(date -u +%H)"
-          if [ "$H" = "07" ] || [ "$H" = "19" ]; then
-            python -m scripts.keyword_gardener --trending --target 8
-          else
-            echo "skip — trend scan runs at 07:00 & 19:00 UTC (now ${H}:00)"
-          fi
+        # Self-gated in the script (DB marker, >=11h between scans) — the old
+        # exact-hour gate never matched GitHub cron drift and silently no-op'd.
+        run: python -m scripts.keyword_gardener --trending --target 8
 
       # ---------------------------------------------------------------- 2b.
       # Estimate keyword competition (LLM, free) → keywords.competition.
@@ -504,6 +500,7 @@ jobs:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
           GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python -m scripts.qdf_report --site ntecodex.com
 
       # ---------------------------------------------------------------- 7e.
