@@ -760,13 +760,17 @@ def _log_verify_rejection(
     Failure to log is swallowed — never block the gardener on it."""
     try:
         with get_db_connection(autocommit=True) as conn, conn.cursor() as cur:
+            # NOTE: alerts columns are (level, category, title, message,
+            # context) — an earlier version used source/payload (don't exist)
+            # so this insert had been silently failing inside this except.
             cur.execute(
                 """
-                insert into alerts (site_id, level, source, message, payload)
-                values (%s, 'info', 'keyword_gardener', %s, %s::jsonb)
+                insert into alerts (site_id, level, category, title, message, context)
+                values (%s, 'info', 'keyword_gardener', %s, %s, %s::jsonb)
                 """,
                 (
                     str(site_id),
+                    "entity-verify dropped keyword",
                     f"entity-verify dropped keyword {keyword!r}",
                     json.dumps({
                         "keyword": keyword,

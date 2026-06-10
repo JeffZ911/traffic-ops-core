@@ -252,15 +252,16 @@ def main() -> int:
             with get_db_connection(autocommit=True) as conn, conn.cursor() as cur:
                 # Dedupe: at most one deadman alert per site per day.
                 cur.execute(
-                    "select 1 from alerts where site_id=%s and source='deadman' "
+                    "select 1 from alerts where site_id=%s and category='deadman' "
                     "and created_at >= date_trunc('day', now() at time zone 'utc') limit 1",
                     (str(site_id),),
                 )
                 if not cur.fetchone():
                     cur.execute(
-                        "insert into alerts (site_id, level, source, message, payload) "
-                        "values (%s, 'critical', 'deadman', %s, %s::jsonb)",
-                        (str(site_id), msg,
+                        "insert into alerts (site_id, level, category, title, message, context) "
+                        "values (%s, 'critical', 'deadman', %s, %s, %s::jsonb)",
+                        (str(site_id),
+                         f"Content production dead ({site_domain})", msg,
                          json.dumps({"attempted": attempted, "crashed": crashed,
                                      "first_error": results[0].get("error", "")[:300]})),
                     )
