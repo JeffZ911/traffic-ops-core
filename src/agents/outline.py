@@ -215,6 +215,16 @@ FOUR HARD RULES — outputs are rejected if any rule is violated:
      left out, with a specific reason for each (e.g., "DXRacer racing-seat
      geometry pushes shoulders forward — wrong for long sessions").
 
+  R5 GAME NAMES ARE FLAVOR ONLY — NEVER EXPLAIN GAME MECHANICS. If the
+     keyword mentions a game, character, boss, or mode, you may reference
+     the NAME as scenario flavor ("long Genshin farming sessions") but you
+     MUST NOT explain or describe character kits, abilities, rotations,
+     team comps, game modes, or which game a character belongs to — and
+     never put a character name in the H1/title. This is a GEAR article;
+     game-mechanic detail is where fabrication happens (QA hard-rejects
+     ~70% of drafts that attempt it). When unsure about any game fact,
+     write around it: talk about the gear, the session length, the genre.
+
 Reply with a single JSON object (no surrounding prose, no fences). Schema:
 {{
   "article_type": "comparison",

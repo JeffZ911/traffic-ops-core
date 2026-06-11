@@ -41,6 +41,15 @@ the opposite):
 - Recommend SPECIFIC products from the REAL product list below, and link them
   inline as markdown: [Product Name](https://imade4u.com/products/HANDLE).
   Only use products from this list — never invent products, prices, or links.
+- You know each product ONLY by its title. NEVER state materials, dimensions,
+  prices, shipping times, or features that the title itself does not say —
+  describe what the gift IS and why it's meaningful, not invented specs.
+  (e.g. if the title doesn't say "sterling silver", you may not call it
+  sterling silver.) Same for the outside world: no celebrity claims, no
+  statistics, no "trending on TikTok" stated as fact — speak of styles and
+  occasions in general terms instead.
+- Weave product links into the prose naturally across the gift ideas — every
+  recommended gift idea links its product (6+ linked products per article).
 - 900-1400 words. Use H2/H3 structure, a short intro, 6-9 gift ideas, a couple
   of practical buying/personalization tips, and a warm closing.
 
@@ -78,17 +87,22 @@ def _products(match: list[str], limit: int = 12) -> list[dict]:
         for w in re.findall(r"[a-z]+", m.lower()):
             if len(w) >= 4 and w not in _GEN:
                 toks.add(w); toks.add(w.rstrip("s"))  # singular + plural
-    out = []
+    # Rank by RELEVANCE (matched-token count) instead of catalog order, so
+    # topic-central products dominate the writer's list. Catalog-order picking
+    # caused "bait-and-switch" articles: a wooden-sign topic got mostly mugs/
+    # necklaces (first 12 catalog matches on a generic token) and the writer
+    # wrote about those, breaking the title's promise.
+    scored = []
     for p in prods:
         if p.get("status") != "active":
             continue
         hay = f"{p.get('title','')} {p.get('product_type','')} {p.get('tags','')}".lower()
-        if any(t in hay for t in toks):
-            out.append({"title": p["title"], "handle": p["handle"],
-                        "image": (p.get("image") or {}).get("src")})
-        if len(out) >= limit:
-            break
-    return out
+        hits = sum(1 for t in toks if t in hay)
+        if hits:
+            scored.append((hits, {"title": p["title"], "handle": p["handle"],
+                                  "image": (p.get("image") or {}).get("src")}))
+    scored.sort(key=lambda x: -x[0])
+    return [p for _, p in scored[:limit]]
 
 
 def _embed_product_images(body_md: str, by_handle: dict) -> str:
