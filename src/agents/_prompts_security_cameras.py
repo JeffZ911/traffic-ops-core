@@ -325,6 +325,9 @@ FORMAT RULES:
   the CMS adds related-article links after publish. Inline links are
   EXTERNAL authoritative sources only.
 - Do not embed <img> or ![](...) — images are added post-publish.
+- Before Sources, include `## Frequently Asked Questions` with 3-5 `###`
+  questions real camera shoppers/owners ask about this topic, each answered
+  in 2-4 sentences (same factual rules — never invent specs or policies).
 - End with a `## Sources` H2 listing the external URLs you actually
   cited (one Markdown bullet each: - <Title or host> — <full URL>).
   Only list URLs you genuinely retrieved; a dead-link checker runs at

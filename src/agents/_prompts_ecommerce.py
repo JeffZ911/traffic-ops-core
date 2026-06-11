@@ -276,6 +276,9 @@ Strict requirements:
   *worth reading*, not to sell mid-paragraph.
 - Do not embed any <img> or ![alt](url) markdown images. The CMS
   injects hero + section images post-publish.
+- Before Sources, include `## Frequently Asked Questions` with 3-5 `###`
+  questions real sellers ask about this topic, each answered in 2-4 sentences
+  (same factual rules — never invent platform policies or numbers).
 - End with a `## Sources` H2 listing the external URLs you cited.
 
 Reply with the Markdown body ONLY. No preamble, no JSON wrapping, no

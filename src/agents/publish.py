@@ -240,6 +240,46 @@ def _inject_editorial_banner(content_md: str, tier: str, date_iso: str) -> str:
     return banner + "\n" + content_md
 
 
+def _restore_sources_section(content_md: str, source_uris: list) -> str:
+    """If the body's `## Sources` section has no real links, resolve the
+    grounding-redirect URIs (vertexaisearch 302s → the actual source page)
+    and render up to 5 as the Sources list. Dedupe by domain; skip
+    social/google/utility hosts. Best-effort with short timeouts."""
+    import urllib.request as _ur
+
+    m = re.search(r"(?ms)^##\s+Sources\s*\n(.*?)(?=^##\s|\Z)", content_md)
+    if not m:
+        return content_md
+    section_body = m.group(1)
+    if re.search(r"https?://(?!vertexaisearch)", section_body):
+        return content_md  # already has real links
+
+    _SKIP = ("google.", "youtube.", "facebook.", "twitter.", "x.com",
+             "instagram.", "tiktok.", "reddit.com/user", "vertexaisearch")
+    resolved: list[tuple[str, str]] = []  # (host, final_url)
+    seen_hosts: set[str] = set()
+    for uri in source_uris[:10]:
+        if len(resolved) >= 5 or not isinstance(uri, str) or not uri.startswith("http"):
+            continue
+        try:
+            req = _ur.Request(uri, headers={"User-Agent": "Mozilla/5.0"})
+            with _ur.urlopen(req, timeout=8) as r:
+                final = r.geturl()
+        except Exception:
+            continue
+        host = re.sub(r"^https?://(www\.)?", "", final).split("/")[0]
+        if any(s in final for s in _SKIP) or host in seen_hosts:
+            continue
+        seen_hosts.add(host)
+        resolved.append((host, final))
+    if not resolved:
+        return content_md
+    bullet_list = "\n".join(f"- {h} — {u}" for h, u in resolved) + "\n"
+    new_section = "## Sources\n\n" + bullet_list
+    print(f"      sources restore: rendered {len(resolved)} resolved citation(s)")
+    return content_md[: m.start()] + new_section + content_md[m.end():]
+
+
 def _yaml_escape(s: str) -> str:
     """Quote a YAML scalar that may contain unsafe chars."""
     if any(c in s for c in (':', '#', '\n', '"', '\'')) or s.strip() != s:
@@ -526,6 +566,18 @@ class PublishAgent(BaseAgent):
         except Exception as e:
             # Network hiccup in CI must never block a publish. Log + skip.
             print(f"      link_validator: skipped ({e})")
+
+        # ──── Sources restoration (2026-06-10) ────
+        # The grounding pipeline leaves the body's `## Sources` section EMPTY:
+        # the writer's citations are vertexaisearch redirect URIs (stored in
+        # frontmatter sources / agent_runs) which never render as real links —
+        # a self-inflicted E-E-A-T hole (live pixelmatch articles had a Sources
+        # heading with zero external links). Resolve the redirects to their
+        # final real URLs and render them under ## Sources when it's empty.
+        try:
+            content_md = _restore_sources_section(content_md, fm.get("sources") or [])
+        except Exception as e:  # noqa: BLE001 — enhancement, never block publish
+            print(f"      sources restore: skipped ({type(e).__name__})")
 
         body = (
             "---\n"

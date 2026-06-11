@@ -170,6 +170,7 @@ def main() -> int:
             summary=art["summary"], meta_title=art["meta_title"],
             meta_description=art["meta_description"], image_url=art["hero"],
             image_alt=art["title"], published=args.live,
+            products=art.get("products"),
         )
         _record(site_id, kid, art, r, atype, live=args.live, qa=verdict)
         made += 1

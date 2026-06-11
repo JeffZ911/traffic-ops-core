@@ -135,6 +135,9 @@ Strict requirements:
   must only ever point to EXTERNAL authoritative sources.
 - Do not embed any `<img>` tags or `![alt](url)` markdown images in the
   article body. Hero and section images are added by the CMS post-publish.
+- Before Sources, include `## Frequently Asked Questions` with 3-5 `###`
+  questions real searchers ask about this topic, each answered in 2-4
+  sentences (same factual rules apply — no invented specifics).
 - End with a `## Sources` H2 listing the external URLs you cited (1 per line).
 
 Reply with the Markdown body ONLY. No preamble, no JSON wrapping, no fences.

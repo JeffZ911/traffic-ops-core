@@ -24,6 +24,15 @@ from src.integrations.shopify_blog import publish_article
 
 load_dotenv()
 
+# Verified-200 authority references the writer MAY cite (0-2 per article).
+# A closed whitelist because the gift writer runs WITHOUT search grounding —
+# any other external URL it produced would be hallucinated.
+TRUSTED_REFS = """  - Father's Day (history & dates) — https://en.wikipedia.org/wiki/Father%27s_Day
+  - Mother's Day (history & dates) — https://en.wikipedia.org/wiki/Mother%27s_Day
+  - Valentine's Day (history) — https://en.wikipedia.org/wiki/Valentine%27s_Day
+  - Birthstones by month — https://en.wikipedia.org/wiki/Birthstone
+  - Jewelry/gem care basics (GIA) — https://www.gia.edu/gem-care"""
+
 PROMPT = """You are an expert gift curator writing for iMade4U
 (imade4u.com), a store of PERSONALIZED / custom gifts (engraved jewelry,
 custom keychains, pet portraits & memorials, custom home decor).
@@ -50,7 +59,15 @@ the opposite):
   occasions in general terms instead.
 - Weave product links into the prose naturally across the gift ideas — every
   recommended gift idea links its product (6+ linked products per article).
-- 900-1400 words. Use H2/H3 structure, a short intro, 6-9 gift ideas, a couple
+- Near the end include `## Frequently Asked Questions` with 3-4 `###`
+  questions gift shoppers actually ask about this occasion/product type,
+  each answered in 2-3 sentences (same factual rules — no invented policies,
+  prices, or shipping promises; say "check the product page" instead).
+- You MAY cite 1-2 of these VERIFIED reference links inline where genuinely
+  helpful (e.g. explaining the occasion) — these are the ONLY external links
+  allowed; never invent any other URL:
+{trusted_refs}
+- 1000-1500 words. Use H2/H3 structure, a short intro, 6-9 gift ideas, a couple
   of practical buying/personalization tips, and a warm closing.
 
 REAL PRODUCTS you may recommend (Title — handle):
@@ -74,7 +91,7 @@ def _products(match: list[str], limit: int = 12) -> list[dict]:
     dom = os.getenv("IMADE4U_SHOPIFY_DOMAIN"); tok = os.getenv("IMADE4U_SHOPIFY_ADMIN_TOKEN")
     ver = os.getenv("IMADE4U_SHOPIFY_API_VERSION", "2026-04")
     req = urllib.request.Request(
-        f"https://{dom}/admin/api/{ver}/products.json?limit=250&fields=title,handle,product_type,tags,status,image",
+        f"https://{dom}/admin/api/{ver}/products.json?limit=250&fields=title,handle,product_type,tags,status,image,variants",
         headers={"X-Shopify-Access-Token": tok})
     prods = json.load(urllib.request.urlopen(req, timeout=30))["products"]
     # Robust matching: a `match` entry may be a phrase ("custom photo mugs");
@@ -99,8 +116,14 @@ def _products(match: list[str], limit: int = 12) -> list[dict]:
         hay = f"{p.get('title','')} {p.get('product_type','')} {p.get('tags','')}".lower()
         hits = sum(1 for t in toks if t in hay)
         if hits:
+            price = None
+            try:
+                price = float((p.get("variants") or [{}])[0].get("price") or 0) or None
+            except (TypeError, ValueError):
+                price = None
             scored.append((hits, {"title": p["title"], "handle": p["handle"],
-                                  "image": (p.get("image") or {}).get("src")}))
+                                  "image": (p.get("image") or {}).get("src"),
+                                  "price": price}))
     scored.sort(key=lambda x: -x[0])
     return [p for _, p in scored[:limit]]
 
@@ -131,7 +154,7 @@ def build_article(topic: str, match: list[str], extra_tags: list[str] | None = N
         return None
     by_handle = {p["handle"]: p for p in prods}
     plist = "\n".join(f"  - {p['title']} — {p['handle']}" for p in prods)
-    prompt = PROMPT.format(topic=topic, products=plist)
+    prompt = PROMPT.format(topic=topic, products=plist, trusted_refs=TRUSTED_REFS)
 
     # A full ~1300-word body inside a JSON field is token-heavy; give Pro room
     # and retry once if the response truncates / isn't valid JSON.
@@ -160,9 +183,11 @@ def build_article(topic: str, match: list[str], extra_tags: list[str] | None = N
     hero = next((by_handle[h]["image"] for h in re.findall(r"/products/([a-z0-9-]+)", body)
                  if by_handle.get(h, {}).get("image")), None)
 
+    linked_handles = set(re.findall(r"/products/([a-z0-9-]+)", body))
     return {
         "title": obj["title"],
         "body_md": body,
+        "products": [p for p in prods if p["handle"] in linked_handles],
         "meta_title": obj.get("meta_title"),
         "meta_description": obj.get("meta_description"),
         "summary": obj.get("summary"),

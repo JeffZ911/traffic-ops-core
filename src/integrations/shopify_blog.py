@@ -83,6 +83,34 @@ def markdown_to_html(content_md: str) -> str:
     )
 
 
+def _itemlist_jsonld(title: str, products: list[dict]) -> Optional[str]:
+    """ItemList + Product/Offer JSON-LD for a gift-guide listicle — REAL store
+    products with REAL prices → rich-result eligibility (the NYMag-style
+    advantage an actual store has over media sites). Returns a <script> tag
+    appended to body_html, or None when products lack data."""
+    items = []
+    for i, p in enumerate(p for p in products if p.get("handle")):
+        prod: dict = {
+            "@type": "Product",
+            "name": p["title"],
+            "url": f"https://imade4u.com/products/{p['handle']}",
+        }
+        if p.get("image"):
+            prod["image"] = p["image"]
+        if p.get("price"):
+            prod["offers"] = {"@type": "Offer", "price": f"{p['price']:.2f}",
+                              "priceCurrency": "USD",
+                              "availability": "https://schema.org/InStock",
+                              "url": prod["url"]}
+        items.append({"@type": "ListItem", "position": i + 1, "item": prod})
+    if not items:
+        return None
+    ld = {"@context": "https://schema.org", "@type": "ItemList",
+          "name": title, "numberOfItems": len(items), "itemListElement": items}
+    return ('<script type="application/ld+json">'
+            + json.dumps(ld, ensure_ascii=False) + "</script>")
+
+
 def publish_article(
     *,
     title: str,
@@ -97,12 +125,18 @@ def publish_article(
     blog_handle: Optional[str] = None,
     author: str = "iMade4U",
     published: bool = False,
+    products: Optional[list[dict]] = None,
 ) -> ShopifyArticleResult:
     """Create an article in the Shopify blog. `published=False` → DRAFT (safe,
-    not publicly visible) — the pipeline flips it True only after QA passes."""
+    not publicly visible) — the pipeline flips it True only after QA passes.
+    `products` (title/handle/image/price dicts) → ItemList+Product JSON-LD."""
     dom, _, _ = _cfg()
     blog_id = resolve_blog_id(blog_handle)
     body_html = markdown_to_html(content_md)
+    if products:
+        ld_tag = _itemlist_jsonld(title, products)
+        if ld_tag:
+            body_html += "\n" + ld_tag
 
     article: dict = {
         "title": title,
