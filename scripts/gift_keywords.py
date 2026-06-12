@@ -59,6 +59,40 @@ def _upcoming(today: date, horizon_weeks: int = 8) -> list[str]:
     return out
 
 
+
+GIFT_TREND_PROMPT = """You are a real-time trend researcher for iMade4U, a
+store of PERSONALIZED gifts (engraved jewelry, custom keychains, pet portraits
+& memorials, custom home decor).
+
+USE GOOGLE SEARCH to find what is RISING RIGHT NOW (last 7-14 days) in
+consumer gifting: viral/TikTok-famous personalized gift formats, pop-culture
+or aesthetic moments driving gift searches (quote the real trend), newly
+surging occasion searches, gift-related shopping events. Today: {today}.
+
+HARD RULES:
+- Only trends you can back with a REAL current source — never invent a trend,
+  celebrity moment, or statistic.
+- WRITABILITY: the downstream writer has NO web access and cannot cite
+  sources, so frame every topic as a STYLE/AESTHETIC/OCCASION angle that can
+  be written without asserting a specific celebrity/event as fact.
+  Good: "Bow-Detail 'Coquette' Name Necklaces: This Season's It-Gift"
+  Bad:  "Where to Buy the Necklace Seen on <Celebrity>" (unwritable — the
+  writer can't substantiate the sighting and the factual gate will reject it).
+- CATALOG REALITY: anchor titles on the OCCASION/STYLE/RECIPIENT, never on a
+  specific exotic product format (e.g. "soundwave rings", "hologram lockets")
+  — if the store doesn't carry that exact format, the article becomes a
+  bait-and-switch and gets rejected. Stick to the broad product types listed.
+- Every topic must be writable with our product types: {cats}
+- DISTINCT angles, no near-duplicates of: {existing}
+
+Return exactly {n} topics. Reply ONLY with a JSON array (no fence), each:
+{{"title": "<specific blog title, 50-70 chars>",
+  "type": "<occasion_guide|recipient_guide|buying_guide>" (NO how_to — trend articles are multi-product gift LISTS, single-product how-tos fail the gate),
+  "match": "<2-4 SHORT single-word product nouns, e.g. necklace, keychain>",
+  "tags": "<2-4 comma tags, lowercase-hyphen>",
+  "priority": <80-95>}}
+"""
+
 PROMPT = """You are an SEO content planner for iMade4U, a store of PERSONALIZED
 gifts. Generate {n} DISTINCT, specific gift-guide blog topics — each a unique
 angle (occasion, recipient, product type, or REAL-TIME TREND). No near-dupes.
@@ -108,6 +142,20 @@ def main() -> int:
         planned = cur.fetchone()[0]
         cur.execute("select keyword from keywords where site_id=%s order by created_at desc limit 60", (site_id,))
         existing = [r[0] for r in cur.fetchall()]
+
+    # ── 独立热点扫描(对齐 ntecodex):无条件、自门控(≥11h),每次产
+    # 6-8 个 source='trend' 话题。供给侧保证 imade4u 跟上实时热点 ——
+    # 此前热点只在池子低于阈值时顺带产出,导致全站几乎零热点文章。
+    try:
+        from scripts.keyword_gardener import _last_trend_scan_hours_ago, _mark_trend_scan
+        ago = _last_trend_scan_hours_ago(site_id)
+        if ago is not None and ago < 11:
+            print(f"  📈 gift trend scan: skipped — last {ago:.1f}h ago")
+        else:
+            _gift_trend_scan(site_id, existing, args)
+            _mark_trend_scan(site_id)
+    except Exception as _e:  # noqa: BLE001 — trend layer must never break top-up
+        print(f"  ⚠️  gift trend scan failed: {type(_e).__name__}: {_e}")
 
     if planned >= args.min_planned and not args.force:
         print(f"  pool healthy ({planned} planned ≥ {args.min_planned}) — no top-up"); return 0
@@ -179,6 +227,68 @@ def main() -> int:
     print(f"  ✓ imade4u top-up: +{inserted} topics ({ntrend} real-time trend, "
           f"{'seasonal: '+', '.join(occ) if occ else 'evergreen'}) cost ${resp.cost_usd:.4f}")
     return 0
+
+
+
+
+def _gift_trend_scan(site_id, existing: list, args) -> int:
+    """Grounded real-time gift-trend scan → source='trend' topics (the supply
+    half of the ntecodex QDF pattern; the demand half is the freshness bonus
+    in content_imade4u's picker)."""
+    import json as _json
+    from src.utils.llm import get_llm_provider
+    prompt = GIFT_TREND_PROMPT.format(
+        today=date.today().isoformat(), cats=PRODUCT_CATS, n=8,
+        existing=", ".join(list(existing)[:30]) or "(none)")
+    try:
+        from src.utils.qdf_memory import latest_qdf_guidance
+        g = latest_qdf_guidance(site_id)
+        if g:
+            prompt += "\n\nLEARNINGS FROM OUR RECENT PERFORMANCE (apply):\n" + g
+            print("  🧠 injected QDF guidance into gift trend scan")
+    except Exception:
+        pass
+    resp = get_llm_provider("gemini").generate(
+        prompt=prompt, model=args.model, max_tokens=4000, temperature=0.6,
+        json_mode=False, enable_search=True)
+    t = (resp.text or "").strip()
+    if t.startswith("```"):
+        t = t.split("\n", 1)[-1].rsplit("```", 1)[0]
+    i, j = t.find("["), t.rfind("]")
+    try:
+        data = _json.loads(t[i:j + 1]) if i >= 0 else []
+    except Exception:
+        print("  ⚠️  gift trend parse failed"); return 0
+    have = {k.lower() for k in existing}
+    valid = {"occasion_guide", "recipient_guide", "buying_guide"}
+    n = 0
+    with get_db_connection(autocommit=True) as conn, conn.cursor() as cur:
+        for it in data:
+            if not isinstance(it, dict):
+                continue
+            title = (it.get("title") or "").strip()
+            if not title or title.lower() in have or not it.get("match"):
+                continue
+            atype = it.get("type") if it.get("type") in valid else "buying_guide"
+            notes = f"type={atype}|match={it.get('match')}|tags={it.get('tags','trending-gifts')}"
+            # Catalog-reality check: the match terms must recall >=5 real
+            # products, else the writer can't fulfil the title (bait-and-
+            # switch) — skip the topic instead of wasting a generation.
+            try:
+                from scripts.gift_sample import _products as _gp
+                if len(_gp([m for m in str(it.get("match")).split(",") if m])) < 5:
+                    print(f"    ⏭  catalog-reality skip: {title[:50]!r}")
+                    continue
+            except Exception:
+                pass
+            cur.execute(
+                "insert into keywords (site_id, keyword, intent, priority_score, source, notes, status) "
+                "values (%s,%s,'commercial',%s,'trend',%s,'planned') on conflict (site_id, keyword) do nothing",
+                (str(site_id), title, int(it.get("priority") or 85), notes))
+            if cur.rowcount:
+                n += 1; have.add(title.lower())
+    print(f"  📈 gift trend scan: +{n} trend topics (cost ${resp.cost_usd:.4f})")
+    return n
 
 
 if __name__ == "__main__":

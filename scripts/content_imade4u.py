@@ -120,7 +120,11 @@ def main() -> int:
         cur.execute(
             "select id, keyword, notes from keywords where site_id=%s and status='planned' "
             "and (last_used_at is null or last_used_at < now() - interval '20 hours') "
-            "order by priority_score desc nulls last, created_at asc limit %s",
+            "order by (coalesce(priority_score,0) + case when source='trend' then "
+            "  case when created_at >= now()-interval '1 day' then 150 "
+            "       when created_at >= now()-interval '3 days' then 80 "
+            "       when created_at >= now()-interval '7 days' then 30 else 0 end "
+            "  else 0 end) desc, created_at asc limit %s",
             (site_id, args.count),
         )
         picks = cur.fetchall()
