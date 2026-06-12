@@ -133,7 +133,61 @@ def build_keyword_lookup_from_articles(rows: Iterable[dict]) -> dict[str, str]:
                 name = title.split(":", 1)[0].strip()
             if name and len(name) >= 3:
                 lookup.setdefault(name, url)
-        # We deliberately DO NOT add fuzzy title-keyword links for non-
-        # character articles for now — too easy to hit false-positives.
-        # If we want this later, add curated topic terms here.
+        else:
+            # Non-character articles: ONE distinctive anchor per article,
+            # mined from the title (2026-06-12). The old behavior added
+            # nothing here, which left whole niches (quvii: 0 character_db
+            # rows) with ZERO contextual in-body links. Safety mirrors
+            # qdf_cluster: prefer the strongest 3-gram, require >=2 tokens
+            # AND >=1 corpus-distinctive token, so generic phrases never
+            # become anchors. inject_internal_links' once-per-doc cap and
+            # whole-word matching bound the blast radius.
+            anchor = _best_title_anchor(title, _corpus_generic(rows))
+            if anchor:
+                lookup.setdefault(anchor, url)
     return lookup
+
+
+_ANCHOR_FILLER = {
+    "best", "top", "guide", "how", "to", "the", "a", "an", "for", "of", "in",
+    "on", "with", "without", "vs", "review", "2024", "2025", "2026", "2027",
+    "your", "is", "are", "what", "why", "when", "and", "or", "fix", "fixes",
+    "complete", "ultimate", "explained", "tips",
+}
+_corpus_generic_cache: dict[int, set] = {}
+
+
+def _corpus_generic(rows) -> set:
+    """Top-N most frequent title tokens across the site's articles = the
+    niche's core vocabulary (e.g. camera/security/home) — too generic to be
+    an anchor on its own. Cached per rows-object id (one publish run)."""
+    key = id(rows)
+    if key in _corpus_generic_cache:
+        return _corpus_generic_cache[key]
+    from collections import Counter
+    df = Counter()
+    for r in rows if isinstance(rows, list) else []:
+        for t in set(re.findall(r"[a-z0-9]+", (r.get("title") or "").lower())):
+            if len(t) > 2 and t not in _ANCHOR_FILLER:
+                df[t] += 1
+    generic = {t for t, _ in df.most_common(15)}
+    _corpus_generic_cache[key] = generic
+    return generic
+
+
+def _best_title_anchor(title: str, generic: set) -> str | None:
+    """Strongest distinctive phrase from a title: longest 2-4-gram that
+    doesn't start/end with filler and contains >=1 non-generic token
+    (brand/model/entity, e.g. 'wyze cam v4', 'eufy cloud upload')."""
+    toks = re.findall(r"[a-z0-9]+", (title or "").lower())
+    best = None
+    for n in (4, 3, 2):
+        for i in range(len(toks) - n + 1):
+            g = toks[i:i + n]
+            if g[0] in _ANCHOR_FILLER or g[-1] in _ANCHOR_FILLER:
+                continue
+            if not any(t not in generic and t not in _ANCHOR_FILLER for t in g):
+                continue
+            best = " ".join(g)
+            return best  # first (leftmost) longest distinctive gram wins
+    return best

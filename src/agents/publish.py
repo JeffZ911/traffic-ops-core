@@ -331,7 +331,7 @@ class PublishAgent(BaseAgent):
         with get_db_connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "select id, slug, title, article_type, status, content_md, "
-                "       qa_score, word_count, outline, qa_feedback "
+                "       qa_score, word_count, outline, qa_feedback, site_id "
                 "from articles where id = %s",
                 (str(article_id),),
             )
@@ -464,11 +464,13 @@ class PublishAgent(BaseAgent):
         with get_db_connection() as conn, conn.cursor() as cur:
             cur.execute(
                 """
-                select title, published_url, article_type, outline
+                select title, published_url, article_type, outline, created_at
                   from articles
                  where status = 'published' and id <> %s
+                   and site_id = %s
+                 order by created_at desc
                 """,
-                (str(article_id),),
+                (str(article_id), str(article["site_id"])),
             )
             link_cols = [d.name for d in cur.description]
             other_rows = [dict(zip(link_cols, r)) for r in cur.fetchall()]
@@ -480,6 +482,36 @@ class PublishAgent(BaseAgent):
             )
         else:
             linked_keywords = []
+
+        # ──── Deterministic in-body related links (2026-06-12) ──────
+        # Phrase-anchor injection is precise but low-recall (~0.2/article on
+        # quvii: bodies rarely quote other articles' brand-model phrases).
+        # Benchmarks carry 58-105 in-body links. When phrase matching found
+        # <2, insert one compact Related line after the first H2 — every
+        # article ships ≥3 crawlable in-prose sibling links, zero
+        # false-positive risk. Idempotent via marker.
+        _REL_MARKER = "<!-- auto-related -->"
+        if len(linked_keywords) < 2 and _REL_MARKER not in content_md:
+            _seen_urls = {published_url}
+            _picks = []
+            for r in other_rows:
+                u = r.get("published_url")
+                if not u or u in _seen_urls or u in ("/faq", "/tier-list"):
+                    continue
+                # prefer same-type siblings first (other_rows is newest-first)
+                _picks.append((0 if r.get("article_type") == article["article_type"] else 1, r))
+                _seen_urls.add(u)
+            _picks.sort(key=lambda x: x[0])
+            _picks = [r for _, r in _picks[:3]]
+            if _picks:
+                rel_line = (f"\n{_REL_MARKER}\n*Related: "
+                            + " · ".join(f"[{(r['title'] or 'Related guide')[:70]}]({r['published_url']})"
+                                          for r in _picks) + "*\n")
+                m2 = re.search(r"(?m)^##\s.+$", content_md)
+                if m2:
+                    content_md = content_md[:m2.end()] + rel_line + content_md[m2.end():]
+                else:
+                    content_md += rel_line
 
         # ──── Phase 1A pixelmatch (2026-05-14): CTA injection ───────
         # When the site's niche is ecommerce_tools we inject a mid-article

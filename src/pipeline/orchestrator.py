@@ -148,8 +148,8 @@ def _record_slug_rename(
             cur.execute(
                 """
                 insert into alerts
-                  (site_id, level, source, message, payload)
-                values (%s, 'info', 'orchestrator',
+                  (site_id, level, category, title, message, context)
+                values (%s, 'info', 'orchestrator', 'slug auto-rename',
                         %s, %s::jsonb)
                 """,
                 (
@@ -426,6 +426,33 @@ def run_one_article(
         log(f"  Slug:  {outline.get('slug')}")
         log(f"  Sections: {[s.get('h2') for s in outline.get('sections', [])]}")
         summary["stages"].append({"agent": "outline", "title": outline.get("title")})
+
+        # ── Title-clone gate (2026-06-12) ────────────────────────────────
+        # Distinct keywords can converge on near-identical TITLES ("How a
+        # Beauty Seller Cut Photo Costs 82%/80%..." ×3 in one day on
+        # pixelmatch) — a templated footprint Google's scaled-content
+        # systems punish. Catch it at the OUTLINE stage (before burning
+        # writing+QA spend): near-dup vs recent published titles → fail
+        # early, keyword back to the pool (cooldown forces a fresh angle).
+        from src.agents.keyword_selector import _is_duplicate_topic, _topic_signature
+        _new_title = outline.get("title") or keyword
+        with get_db_connection() as _c, _c.cursor() as _cur:
+            _cur.execute(
+                "select title from articles where site_id=%s and status='published' "
+                "and id <> %s and created_at >= now() - interval '90 days'",
+                (str(site_id), str(article_id)),
+            )
+            _pub_sigs = [t for t in (_topic_signature(r[0] or "") for r in _cur.fetchall()) if t]
+        if _is_duplicate_topic(_topic_signature(_new_title), _pub_sigs):
+            log(f"  ⛔ title-clone gate: {_new_title!r} near-duplicates a recent "
+                f"published title — failing early (no writing spend)")
+            _set_article(article_id, status="failed",
+                         failure_reason="title-clone gate: near-duplicate of recent published title")
+            _set_keyword_status(keyword_id, "planned")
+            summary["final_status"] = "failed"
+            summary["failure_reason"] = "title_clone"
+            return summary
+
         desired_slug = outline.get("slug") or initial_slug
         res = _set_article(
             article_id,

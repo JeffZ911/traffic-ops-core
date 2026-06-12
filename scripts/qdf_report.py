@@ -83,6 +83,11 @@ Analyse signal even when numbers are small — coverage_state progression IS
 signal (which angles got crawled/discovered fastest vs stayed unknown; which
 topic types, freshness, or sources correlate with faster pickup).
 
+CRITICAL — settled vs unsettled data: rows with "gsc_data_settled": false have
+INCOMPLETE impressions/clicks (GSC finalizes ~3 days late). For those rows you
+may reason from coverage_state only; NEVER conclude "this angle gets no
+traffic" from unsettled rows.
+
 Return ONLY a JSON object (no fence):
 {{
   "retrospective": "<3-5 sentences: what worked, what didn't, and WHY, grounded in the data above>",
@@ -206,6 +211,10 @@ def main() -> int:
             "keyword": kw, "selection_notes": notes[:200], "age_days": age,
             "coverage_state": state, "impressions": impr, "clicks": clk,
             "position": round(pos, 1), "tag": tag,
+            # GSC finalizes ~3 days late — impressions/clicks for younger pages
+            # are INCOMPLETE; the AI must not learn "this angle got 0 traffic"
+            # from data that simply hasn't settled yet.
+            "gsc_data_settled": age >= 3,
         })
 
     digest = "\n".join(lines)

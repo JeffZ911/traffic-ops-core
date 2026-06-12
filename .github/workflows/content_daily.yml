@@ -292,6 +292,26 @@ jobs:
         run: |
           python -m scripts.rewrite_one_article --budget-usd 1.00
 
+      # ---------------------------------------------------------------- 5c2.
+      # CTR optimizer (2026-06-12): pages earning impressions at position 5-15
+      # with ~0 clicks get their SERP snippet (title+meta) rewritten using the
+      # page's own real GSC queries + a freshness hook. Cap 2/day, 30-day
+      # per-page cooldown, settled GSC data only. The content-push step ships
+      # the edited frontmatter. This is the 曝光→点击 last-mile loop.
+      - name: CTR optimizer (snippet rewrite, cap 2)
+        timeout-minutes: 8
+        if: steps.budget.outputs.action == 'normal' || steps.budget.outputs.action == 'warn'
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+          SITE_REPO_PATH: ${{ github.workspace }}/ntecodex-site
+        run: python -m scripts.ctr_optimizer --site ntecodex.com --cap 2
+
       # ------------------------------------------------------------- 5d.
       # SAFETY NET (2026-06-01): wire any on-disk hero into frontmatter.
       # Filesystem-only + idempotent. A hero.webp left on disk by a

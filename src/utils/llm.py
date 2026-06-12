@@ -93,6 +93,16 @@ MODEL_FALLBACKS: dict[str, list[str]] = {
 }
 
 
+def _is_transient_overload(err: Exception) -> bool:
+    """503/UNAVAILABLE/overloaded — Google-side transient. Worth one short
+    retry on the SAME model, then worth trying the fallback chain (a sibling
+    model is often healthy while one is overloaded). 2026-06-10: quvii lost
+    3 articles in one day to unretried 503s."""
+    s = str(err).lower()
+    return any(k in s for k in ("503", "unavailable", "overloaded",
+                                "deadline exceeded", "504", "internal error", "500"))
+
+
 def _is_model_unavailable(err: Exception) -> bool:
     """Return True if the error indicates the model itself is gone/unknown."""
     s = str(err).lower()
@@ -214,8 +224,24 @@ class GeminiLLMProvider(BaseLLMProvider):
                 break
             except Exception as e:
                 last_err = e
+                if _is_transient_overload(e):
+                    # Google-side 5xx: brief backoff, retry SAME model once;
+                    # if still down, fall through to the next model in chain.
+                    time.sleep(4)
+                    try:
+                        response = self._client.models.generate_content(
+                            model=m, contents=prompt, config=config,
+                        )
+                        model = m
+                        break
+                    except Exception as e2:
+                        last_err = e2
+                        import sys
+                        print(f"⚠️  {m} transient 5xx twice — trying next model in chain",
+                              file=sys.stderr)
+                        continue
                 if not _is_model_unavailable(e):
-                    # Hard failure (auth, rate limit, network) — don't burn
+                    # Hard failure (auth, quota, network) — don't burn
                     # through the fallback list on something fallback can't fix.
                     raise LLMError(_scrub(f"{type(e).__name__}: {e}")) from None
                 # Else: model gone, try next in chain.
