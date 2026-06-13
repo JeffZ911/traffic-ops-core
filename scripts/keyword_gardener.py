@@ -206,6 +206,19 @@ HARD RULES to avoid fabrication:
 - Prefer trend angles that are inherently grounded: "<game> <version> patch
   notes", "<game> current banner tier impact", "best teams after <version>".
 
+NO-DEMAND TEMPLATE BAN (critical — these earn impressions of ~0):
+- DO NOT fuse the trend with affiliate physical-gear buying guides. FORBIDDEN:
+  "best gaming gear / chair / keyboard / mouse / headphones / IEM / desk for
+  <trend context>", "best gear for 8-hour grinding / long sessions / high-APM
+  farming", and any "best <physical product> for <play-style>" framing. Nobody
+  searches those — they are contrived long-tails. Affiliate gear is handled by
+  a SEPARATE evergreen path, never by trend keywords.
+- A trend keyword must be a query a real player would type THIS WEEK about
+  in-game content: a character, team, build, banner, patch, tier shift, event,
+  or an in-game "X vs Y" (two characters/weapons/teams) — NOT hardware.
+- Keep them concrete and short; if the only angle you can find is a gear
+  buying guide, return FEWER keywords instead.
+
 Existing keywords (do NOT duplicate, case-insensitive):
 {existing_sample}
 
@@ -234,6 +247,16 @@ Existing keywords (do NOT duplicate, case-insensitive):
 Return exactly {n_target} keywords for rising interest, each mapping to ONE
 of: {types}. HARD RULE: NO video-game topics whatsoever. Only verifiable
 trends with a real current source.
+
+ANTI-CLONE TEMPLATE BAN (critical — we have published this same shell a dozen
+times and it cannibalizes itself):
+- DO NOT propose the "how a <seller type> cut/saved photo costs <N>% with
+  <tool>" case-study shell, in any wording (beauty seller, Amazon seller,
+  multi-platform seller, before Prime Day, etc.). That template is saturated.
+- Favor genuine query intent a seller types: a named tool/model + a concrete
+  task ("flux 1 product photo background", "tiktok shop image size 2026"),
+  a real policy/spec change, or a real "tool X vs tool Y" decision. Each
+  keyword must be meaningfully DIFFERENT in subject, not just swapped nouns.
 
 Reply ONLY with a JSON array (no fence), each element:
 {{"keyword": "<lowercase 3-8 words>", "intent": "informational|comparison|how-to|list",
