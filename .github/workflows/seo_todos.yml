@@ -43,13 +43,27 @@ jobs:
       - name: Install Python deps
         run: pip install -e .
 
-      - name: Daily Request-indexing worklist (3 sites · 4 URLs each)
+      - name: Daily Request-indexing worklist (4 sites · unindexed-newest)
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          # GSC OAuth so the worklist can urlInspection-filter to pages Google
+          # hasn't indexed yet (else it falls back to blind rotation).
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
         run: python -m scripts.daily_indexing_worklist
+
+      - name: Index-coverage monitor (4 sites → dashboard panel)
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+        run: python -m scripts.index_coverage
 
       - name: Guest-post SOP card (Quvii pilot)
         continue-on-error: true
