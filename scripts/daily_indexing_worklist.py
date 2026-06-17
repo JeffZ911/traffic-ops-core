@@ -58,8 +58,13 @@ def _ordered_candidates(cur, site_id: str, domain: str) -> list[str]:
         select published_url,
                coalesce(qa_feedback->>'editorial_tier','') as tier,
                published_at
-          from articles
+          from articles a
          where site_id=%s and status='published' and published_url is not null
+           -- affiliate gear roundups are noindex'd (authority concentration);
+           -- never spend the scarce Request-Indexing quota on a noindex page.
+           and not exists (
+             select 1 from article_keywords ak join keywords k on k.id=ak.keyword_id
+              where ak.article_id = a.id and k.source = 'affiliate_seed')
         """,
         (site_id,),
     )
@@ -156,8 +161,11 @@ def build_site_card(cur, domain: str, cap: int, day_ordinal: int) -> str:
     inspect = _make_inspector(domain)
     if inspect is not None:
         cur.execute(
-            """select published_url from articles
+            """select published_url from articles a
                 where site_id=%s and status='published' and published_url is not null
+                  and not exists (
+                    select 1 from article_keywords ak join keywords k on k.id=ak.keyword_id
+                     where ak.article_id = a.id and k.source = 'affiliate_seed')
                 order by published_at desc nulls last""",
             (site_id,),
         )
