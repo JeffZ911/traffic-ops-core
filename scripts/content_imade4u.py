@@ -164,7 +164,16 @@ def main() -> int:
             print(f"   ⏭  catalog can't support it (recall={recall} < {args.min_links} real products) — skipping")
             _set_kw(kid, "skipped"); skipped_catalog += 1; continue
 
-        art = build_article(topic, match, tags, model=args.model)
+        # Rank the RIGHT products to the top. The stored match is a broad
+        # category ("necklace"); for a specific title ("Photo Projection
+        # Necklaces") that ranks generic name necklaces level with the actual
+        # photo-projection product, so the writer features the wrong items and
+        # the intent gate fails. Folding the topic into the match adds its
+        # distinctive token ("projection") so _products' hit-count ranking
+        # floats the on-topic products first. Recall gate stays on the broad
+        # term above (so we don't let no-stock topics like "canvas" back in).
+        match_ranked = match + [topic]
+        art = build_article(topic, match_ranked, tags, model=args.model)
         if not art:
             print("   ⚠️  generation failed — left planned for retry"); continue
         # mechanical gate
@@ -176,7 +185,9 @@ def main() -> int:
         # claims and invented product prices/specs from reaching the live
         # revenue store. Conservative: gate errors = fail.
         from scripts.gift_sample import _products as _prods
-        plines = "\n".join(f"  - {p['title']} — {p['handle']}" for p in _prods(match))
+        # Same enriched ranking the writer saw, so the gate judges intent
+        # against the on-topic products (not the generic-category recall).
+        plines = "\n".join(f"  - {p['title']} — {p['handle']}" for p in _prods(match_ranked))
         verdict = _qa_gate(topic, art["body_md"], plines)
         fs, im, q = (verdict.get("factual_safety", 0), verdict.get("intent_match", 0),
                      verdict.get("quality", 0))
