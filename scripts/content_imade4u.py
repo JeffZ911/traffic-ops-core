@@ -24,7 +24,7 @@ from dotenv import load_dotenv
 
 from src.db.client import get_db_connection
 from src.integrations.shopify_blog import publish_article
-from scripts.gift_sample import build_article
+from scripts.gift_sample import build_article, _products
 
 load_dotenv()
 
@@ -125,7 +125,11 @@ def main() -> int:
             "       when created_at >= now()-interval '3 days' then 80 "
             "       when created_at >= now()-interval '7 days' then 30 else 0 end "
             "  else 0 end) desc, created_at asc limit %s",
-            (site_id, args.count),
+            # Over-fetch: many planned topics target product categories the
+            # catalog doesn't stock (canvas/wall-art/keychain) and get skipped
+            # by the catalog-reality gate below, so we need a deeper candidate
+            # pool to still reach `count` viable topics in one run.
+            (site_id, max(args.count * 6, 12)),
         )
         picks = cur.fetchall()
         cur.execute("select lower(title) from articles where site_id=%s and status='published'", (site_id,))
@@ -135,7 +139,10 @@ def main() -> int:
         print("  no planned topics — run bootstrap_imade4u or keyword top-up"); return 0
 
     made = 0
+    skipped_catalog = 0
     for kid, topic, notes in picks:
+        if made >= args.count:
+            break
         n = _parse_notes(notes)
         match = [m for m in (n.get("match", "")).split(",") if m]
         tags = [t for t in (n.get("tags", "")).split(",") if t]
@@ -145,6 +152,17 @@ def main() -> int:
         if _norm(topic) in published_titles:
             print("   ⏭  near-duplicate of a published title — skipping");
             _set_kw(kid, "skipped"); continue
+
+        # CATALOG-REALITY gate (pre-generation). A topic whose match terms recall
+        # fewer than min_links REAL products can NEVER pass the post-write link
+        # gate — generating it just burns an LLM call and leaves the pipeline
+        # publishing nothing (imade4u went silent 06-17 this way: the keyword
+        # generator drifted into categories we don't stock — canvas, wall-art,
+        # keychains). Skip such topics up front so the run reaches a viable one.
+        recall = len(_products(match)) if match else 0
+        if recall < args.min_links:
+            print(f"   ⏭  catalog can't support it (recall={recall} < {args.min_links} real products) — skipping")
+            _set_kw(kid, "skipped"); skipped_catalog += 1; continue
 
         art = build_article(topic, match, tags, model=args.model)
         if not art:
@@ -184,7 +202,8 @@ def main() -> int:
               f"imgs={art['n_images']} cost=${art['cost_usd']:.4f}")
         print(f"     {r.url if args.live else r.admin_url}")
 
-    print(f"\n  done — {made}/{len(picks)} published ({'live' if args.live else 'drafts'})")
+    print(f"\n  done — {made}/{args.count} published ({'live' if args.live else 'drafts'})"
+          f"{f', {skipped_catalog} skipped (catalog gap)' if skipped_catalog else ''}")
     return 0
 
 

@@ -58,13 +58,31 @@ def run_site(svc, cur, domain: str, sample: int) -> str:
     if not row:
         return f"{domain}: no site row — skip"
     site_id = str(row[0])
+    # Sample the most recent pages that have had a FAIR chance to be indexed —
+    # i.e. published >= 4 days ago. Sampling the absolute newest pages biases
+    # high-velocity sites (ntecodex publishes ~9/day) to a window of 1-3-day-old
+    # pages Google simply hasn't crawled yet, reporting a false 0%. Also exclude
+    # affiliate roundups (intentionally noindex'd) so they don't drag coverage.
     cur.execute(
         """select a.published_url from articles a
             where a.site_id=%s and a.status='published' and a.published_url is not null
+              and a.published_at <= now() - interval '4 days'
+              and not exists (
+                select 1 from article_keywords ak join keywords k on k.id=ak.keyword_id
+                 where ak.article_id = a.id and k.source = 'affiliate_seed')
             order by a.published_at desc nulls last limit %s""",
         (site_id, sample),
     )
     urls = [_public_url(domain, r[0]) for r in cur.fetchall()]
+    if not urls:
+        # Brand-new site with nothing older than 4 days yet — fall back to newest.
+        cur.execute(
+            """select a.published_url from articles a
+                where a.site_id=%s and a.status='published' and a.published_url is not null
+                order by a.published_at desc nulls last limit %s""",
+            (site_id, sample),
+        )
+        urls = [_public_url(domain, r[0]) for r in cur.fetchall()]
     if not urls:
         return f"{domain}: no published URLs — skip"
 
