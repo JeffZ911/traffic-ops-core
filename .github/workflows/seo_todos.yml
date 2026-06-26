@@ -1,22 +1,19 @@
-name: SEO Todos (daily worklist refresh)
+name: SEO Todos (daily portfolio retro + monitors)
 # Decoupled from content generation ON PURPOSE. The authority wall — not
-# article volume — is the bottleneck (see the indexing census), so the daily
-# human worklist must keep refreshing even on days we throttle content.
+# article volume — is the bottleneck, so these daily ops keep running even on
+# days we throttle content.
 #
-# Writes ONLY clear, methodology-driven cards into ops_tasks → dashboard
-# /todos. History:
-#   - 2026-06-02: retired the vague "Authority · Community/Outreach/Asset" +
-#     funnel-review cards (no concrete action).
-#   - 2026-06-03: retired the "Daily GSC request-indexing" cards too.
-#   - 2026-06-04: REINSTATED request-indexing as per-site copy-paste cards.
-#     GSC diagnosis = "Discovered – currently not indexed": Google hasn't even
-#     crawled the pages, so forcing a crawl IS the right lever now. The cards
-#     are dependency-free (DB only, date-rotating 4 URLs/site) — no GSC API.
-#     HARO retired (too slow); sop_worklist now ships only the guest-post card.
+# History:
+#   - 2026-06-04: ran per-site manual "GSC Request Indexing" copy-paste cards.
+#   - 2026-06-23: RETIRED those (Jeff) — Google has no bulk indexing API for
+#     general content and the manual pokes produced no measurable lift (clicks
+#     stayed ~0 for weeks). Indexing is now pursued via authority (guest posts /
+#     internal linking), and this workflow's job shifted to OBSERVABILITY.
 #
-# Cards: daily_indexing_worklist → 3 per-site request-indexing lists (4 URLs
-# each, rotating); sop_worklist → the guest-post-now card (Quvii). DB-only;
-# no checkout, no article generation, no deploys.
+# Daily steps (DB/GSC reads only — no checkout, no article gen, no deploys):
+#   - daily_retro    → one cross-site AI retrospective LOG (metrics_raw)
+#   - index_coverage → per-site indexed/discovered/unknown → dashboard panel
+#   - sop_worklist   → the guest-post-now card (Quvii)
 
 on:
   schedule:
@@ -43,17 +40,22 @@ jobs:
       - name: Install Python deps
         run: pip install -e .
 
-      - name: Daily Request-indexing worklist (4 sites · unindexed-newest)
+      # Manual "paste URL into GSC → Request Indexing" worklist RETIRED
+      # (2026-06-23, Jeff): Google has no bulk indexing API for general content,
+      # the manual copy-paste cards produced no measurable lift (clicks stayed
+      # ~0 across weeks), and they were operator busywork. Indexing is now
+      # pursued via authority (guest posts / internal linking), not manual pokes.
+
+      - name: Portfolio daily retrospective (all sites, one AI log)
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-          # GSC OAuth so the worklist can urlInspection-filter to pages Google
-          # hasn't indexed yet (else it falls back to blind rotation).
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
           GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
-        run: python -m scripts.daily_indexing_worklist
+        run: python -m scripts.daily_retro
 
       - name: Index-coverage monitor (4 sites → dashboard panel)
         continue-on-error: true
