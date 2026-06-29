@@ -393,6 +393,28 @@ def run_trending(site_id: UUID, config: dict, existing: set[str], args) -> int:
             n_target=args.target, types=", ".join(types),
         )
 
+    # Real social-signal grounding (vendored last30days skill): what is ACTUALLY
+    # bubbling on Reddit / Hacker News / GitHub for this niche in the last 30
+    # days, with real engagement — leading signal vs the model guessing. The
+    # generator turns RELEVANT signals into keywords and ignores off-topic noise;
+    # our downstream factual/catalog gates still apply. Best-effort: a failed or
+    # empty fetch never blocks trend generation.
+    try:
+        from scripts.social_trends import fetch_social_signals, format_for_prompt
+        _sigs = fetch_social_signals(niche)
+        if _sigs:
+            prompt += (
+                "\n\nREAL TRENDING SIGNALS (last 30 days — Reddit / HN / GitHub, "
+                "high real engagement). Turn the ones RELEVANT to our niche into "
+                "keywords; IGNORE off-topic noise (e.g. a generic repo that merely "
+                "contains the word 'camera'). Favour specific products, events, "
+                "problems, or comparisons people are discussing RIGHT NOW:\n"
+                + format_for_prompt(_sigs) + "\n"
+            )
+            print(f"   📡 injected {len(_sigs)} social signal(s) into trend prompt")
+    except Exception as _e:  # noqa: BLE001 — grounding is an enhancement, never fatal
+        print(f"   ⚠️  social signals skipped: {type(_e).__name__}: {str(_e)[:80]}")
+
     # Self-improvement loop: inject the latest AI guidance (from qdf_report's
     # retrospective on how past trend pages performed) so each generation
     # builds on what actually won impressions — knowledge flows day to day.

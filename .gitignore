@@ -30,3 +30,7 @@ build/
 *.bak
 env*.bak
 out-brand-images/
+
+# vendored skill — never commit bytecode
+vendor/**/__pycache__/
+vendor/**/*.pyc
