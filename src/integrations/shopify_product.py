@@ -33,6 +33,26 @@ def _seo_metafields(meta_title: Optional[str], meta_description: Optional[str]) 
     return mf
 
 
+def _upsert_metafield(owner_path: str, namespace: str, key: str, value: str,
+                      mtype: str = "single_line_text_field") -> None:
+    """Set ONE metafield idempotently: PUT the existing one by id, else POST a
+    new one. Inline metafields on a product PUT do NOT reliably upsert by
+    (namespace,key) — without the id Shopify can CREATE a duplicate — so on an
+    UPDATE we must resolve the id first. (On CREATE, inline is fine — no dup
+    risk — which is why create_custom_collection can stay inline.)"""
+    existing = _api("GET", f"{owner_path}/metafields.json?namespace={namespace}&key={key}"
+                    ).get("metafields", [])
+    match = next((m for m in existing
+                  if m.get("namespace") == namespace and m.get("key") == key), None)
+    if match:
+        _api("PUT", f"metafields/{match['id']}.json",
+             {"metafield": {"id": match["id"], "value": value, "type": mtype}})
+    else:
+        _api("POST", f"{owner_path}/metafields.json",
+             {"metafield": {"namespace": namespace, "key": key,
+                            "value": value, "type": mtype}})
+
+
 def list_products(limit: int = 250,
                   fields: str = "id,title,handle,product_type,tags,status,body_html") -> list[dict]:
     """Active + all products (one page). Shares the same fetch the ranker uses."""
@@ -55,21 +75,19 @@ def get_product_by_handle(handle: str,
 def set_product_seo(product_id: int, *, meta_title: Optional[str] = None,
                     meta_description: Optional[str] = None,
                     body_html: Optional[str] = None) -> dict:
-    """Optimize a product's SEO title/meta (+ optional body_html). Inline
-    metafields upsert by (namespace,key) on the product PUT. Never touches the
-    merchandising `title`. No-op returns the current product. Returns the
-    updated product dict (raises RuntimeError with the Shopify body on 4xx —
-    e.g. 403 if the write_products scope isn't granted yet)."""
-    product: dict = {"id": int(product_id)}
-    mf = _seo_metafields(meta_title, meta_description)
-    if mf:
-        product["metafields"] = mf
+    """Optimize a product's SEO title/meta (+ optional body_html). Metafields
+    are upserted by id (never duplicated). Never touches the merchandising
+    `title`. Returns the updated product dict (raises RuntimeError with the
+    Shopify body on 4xx — e.g. 403 if write_products isn't granted yet)."""
+    owner = f"products/{int(product_id)}"
+    if meta_title:
+        _upsert_metafield(owner, "global", "title_tag", meta_title[:70])
+    if meta_description:
+        _upsert_metafield(owner, "global", "description_tag", meta_description[:160])
     if body_html is not None:
-        product["body_html"] = body_html
-    if len(product) == 1:            # nothing to write
-        return get_product(product_id)
-    return _api("PUT", f"products/{product_id}.json",
-                {"product": product}).get("product", {})
+        _api("PUT", f"{owner}.json",
+             {"product": {"id": int(product_id), "body_html": body_html}})
+    return get_product(product_id)
 
 
 def create_custom_collection(title: str, *, body_html: str = "",

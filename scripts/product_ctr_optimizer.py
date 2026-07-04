@@ -70,11 +70,16 @@ Reply ONLY JSON (no fence): {{"title": "...", "description": "..."}}
 
 
 def _recent(site_id: str) -> set[str]:
+    """Handles applied OR proposed in the last 30 days — so a propose-only run
+    doesn't re-propose (and re-spend an LLM call on) the same pages every day."""
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
-            """select payload->'product_seo_rewrite'->>'handle' from metrics_raw
-               where site_id=%s and payload ? 'product_seo_rewrite'
-                 and fetched_at >= now() - interval '30 days'""",
+            """select coalesce(payload->'product_seo_rewrite'->>'handle',
+                               payload->'product_seo_proposal'->>'handle')
+                 from metrics_raw
+                where site_id=%s
+                  and (payload ? 'product_seo_rewrite' or payload ? 'product_seo_proposal')
+                  and fetched_at >= now() - interval '30 days'""",
             (site_id,))
         return {r[0] for r in cur.fetchall() if r[0]}
 
@@ -129,9 +134,12 @@ def main() -> int:
     end = date.today() - timedelta(days=3)
     start = end - timedelta(days=14)
 
-    rows = svc.searchanalytics().query(siteUrl=prop, body={
-        "startDate": start.isoformat(), "endDate": end.isoformat(),
-        "dimensions": ["page"], "rowLimit": 500}).execute().get("rows", [])
+    try:
+        rows = svc.searchanalytics().query(siteUrl=prop, body={
+            "startDate": start.isoformat(), "endDate": end.isoformat(),
+            "dimensions": ["page"], "rowLimit": 500}).execute().get("rows", [])
+    except Exception as e:  # noqa: BLE001 — never crash the content pipeline
+        print(f"  ⚠️  GSC page query failed ({type(e).__name__}) — skip run"); return 0
     done = _recent(site_id)
     cands = []
     for r in rows:
@@ -158,12 +166,15 @@ def main() -> int:
         if not prod:
             print(f"  ⏭  no product for handle {h} — skip"); continue
         # top real queries for this page — MUST name an in-stock attribute
-        qresp = svc.searchanalytics().query(siteUrl=prop, body={
-            "startDate": start.isoformat(), "endDate": end.isoformat(),
-            "dimensions": ["query"], "rowLimit": 10,
-            "dimensionFilterGroups": [{"filters": [
-                {"dimension": "page", "operator": "equals", "expression": url}]}],
-        }).execute().get("rows", [])
+        try:
+            qresp = svc.searchanalytics().query(siteUrl=prop, body={
+                "startDate": start.isoformat(), "endDate": end.isoformat(),
+                "dimensions": ["query"], "rowLimit": 10,
+                "dimensionFilterGroups": [{"filters": [
+                    {"dimension": "page", "operator": "equals", "expression": url}]}],
+            }).execute().get("rows", [])
+        except Exception as e:  # noqa: BLE001 — one flaky query must not abort the run
+            print(f"  ⏭  {h}: GSC query failed ({type(e).__name__}) — skip"); continue
         qtexts = [q["keys"][0] for q in qresp]
         blob = " ".join(qtexts).lower()
         # Tier-1 = a genuine LONG-TAIL, not a bare head term Etsy owns. Qualify
@@ -175,10 +186,13 @@ def main() -> int:
         queries = "\n".join(f"  - {q['keys'][0]} ({int(q['impressions'])} imp, pos {q['position']:.0f})"
                             for q in qresp) or "  (anonymized)"
 
-        r2 = llm.generate(prompt=_PROMPT.format(
-            pos=pos, impr=impr, title=prod.get("title", h), ptype=prod.get("product_type", ""),
-            queries=queries, today=today.isoformat()),
-            model=args.model, max_tokens=3500, temperature=0.4, json_mode=True)
+        try:
+            r2 = llm.generate(prompt=_PROMPT.format(
+                pos=pos, impr=impr, title=prod.get("title", h), ptype=prod.get("product_type", ""),
+                queries=queries, today=today.isoformat()),
+                model=args.model, max_tokens=3500, temperature=0.4, json_mode=True)
+        except Exception as e:  # noqa: BLE001 — LLM hiccup on one page must not abort
+            print(f"  ⏭  {h}: LLM failed ({type(e).__name__}) — skip"); continue
         t = (r2.text or "").strip()
         if t.startswith("```"):
             t = t.split("\n", 1)[-1].rsplit("```", 1)[0]

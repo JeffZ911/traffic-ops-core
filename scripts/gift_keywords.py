@@ -208,6 +208,10 @@ def main() -> int:
         cur.execute("select keyword from keywords where site_id=%s order by created_at desc limit 60", (site_id,))
         existing = [r[0] for r in cur.fetchall()]
 
+    # Fetch the real GSC proven-demand block ONCE and share it (one API call for
+    # both the trend scan and the top-up prompt).
+    proven = _proven_demand(site_id)
+
     # ── 独立热点扫描(对齐 ntecodex):无条件、自门控(≥11h),每次产
     # 6-8 个 source='trend' 话题。供给侧保证 imade4u 跟上实时热点 ——
     # 此前热点只在池子低于阈值时顺带产出,导致全站几乎零热点文章。
@@ -217,7 +221,7 @@ def main() -> int:
         if ago is not None and ago < 11:
             print(f"  📈 gift trend scan: skipped — last {ago:.1f}h ago")
         else:
-            _gift_trend_scan(site_id, existing, args)
+            _gift_trend_scan(site_id, existing, args, proven)
             _mark_trend_scan(site_id)
     except Exception as _e:  # noqa: BLE001 — trend layer must never break top-up
         print(f"  ⚠️  gift trend scan failed: {type(_e).__name__}: {_e}")
@@ -232,7 +236,7 @@ def main() -> int:
                 "pillars (pet memorial, sympathy, recipient, buying guides).")
     prompt = PROMPT.format(n=args.target, cats=PRODUCT_CATS, seasonal=seasonal,
                            year=date.today().year, attributes=_ATTRIBUTE_HINTS,
-                           banned=_HEAD_TERM_BAN, proven=_proven_demand(site_id),
+                           banned=_HEAD_TERM_BAN, proven=proven,
                            existing="\n".join(f"  - {k}" for k in existing[:50]) or "  (none)")
 
     # Self-improvement loop: inject the latest AI guidance (from qdf_report's
@@ -309,17 +313,17 @@ def main() -> int:
 
 
 
-def _gift_trend_scan(site_id, existing: list, args) -> int:
+def _gift_trend_scan(site_id, existing: list, args, proven: str = "") -> int:
     """Grounded real-time gift-trend scan → source='trend' topics (the supply
     half of the ntecodex QDF pattern; the demand half is the freshness bonus
-    in content_imade4u's picker)."""
+    in content_imade4u's picker). `proven` = the shared GSC proven-demand block."""
     import json as _json
     from src.utils.llm import get_llm_provider
     prompt = GIFT_TREND_PROMPT.format(
         today=date.today().isoformat(), cats=PRODUCT_CATS, n=8,
         attributes=_ATTRIBUTE_HINTS,
         existing=", ".join(list(existing)[:30]) or "(none)")
-    prompt += _proven_demand(site_id)
+    prompt += proven
     try:
         from src.utils.qdf_memory import latest_qdf_guidance
         g = latest_qdf_guidance(site_id)
