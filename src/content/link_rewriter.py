@@ -60,6 +60,14 @@ class RewriteRule:
     # brand-anchor links, Amazon wins.
     manufacturer_allowlist: list[str] = field(default_factory=list)
 
+    # VERIFIED ASIN map — case-insensitive anchor substring → ASIN.
+    # When a product anchor matches, we emit a direct /dp/<ASIN> link
+    # (converts far better than a search page). ASINs are HUMAN-verified
+    # and entered via the Dashboard (sites.config.link_rewriter.asin_map);
+    # code NEVER invents them — an unmatched anchor falls back to the
+    # safe Amazon search link. Longest matching key wins.
+    asin_map: dict[str, str] = field(default_factory=dict)
+
 
 # Inline-link regex: matches [anchor](url) where neither contains
 # unescaped brackets/parens. Allows nested parens in URL up to one
@@ -188,7 +196,22 @@ def _classify(anchor: str, url: str, rule: RewriteRule) -> Action:
 
 
 def _to_amazon_search(anchor: str, rule: RewriteRule) -> str:
-    """Build an Amazon search URL with the site's affiliate tag."""
+    """Affiliate URL for a product anchor: a direct /dp/ link when a
+    human-verified ASIN matches the anchor (longest key wins), else the
+    safe Amazon search link. Both carry the site's tag."""
+    anchor_lc = anchor.strip().lower()
+    best = ""
+    for key in rule.asin_map:
+        k = key.strip().lower()
+        if k and k in anchor_lc and len(k) > len(best):
+            best = k
+    if best:
+        asin = rule.asin_map.get(best) or next(
+            v for kk, v in rule.asin_map.items() if kk.strip().lower() == best)
+        base = f"https://www.amazon.{rule.amazon_tld}/dp/{asin}"
+        if rule.amazon_tag:
+            base += f"?tag={rule.amazon_tag}"
+        return base
     q = quote_plus(anchor.strip())
     base = f"https://www.amazon.{rule.amazon_tld}/s?k={q}"
     if rule.amazon_tag:
@@ -802,6 +825,7 @@ def rule_for_site(
         brand_patterns=list(base.get("brand_patterns") or []),
         editorial_allowlist=list(base.get("editorial_allowlist") or []),
         manufacturer_allowlist=list(base.get("manufacturer_allowlist") or []),
+        asin_map=dict(base.get("asin_map") or {}),
     )
 
 
