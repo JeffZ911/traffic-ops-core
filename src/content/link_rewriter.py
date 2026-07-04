@@ -148,7 +148,15 @@ def _classify(anchor: str, url: str, rule: RewriteRule) -> Action:
     # Amazon search of the URL string. Let it fall through to the
     # allowlist/keep/strip logic on its actual destination.
     anchor_lc = anchor.lower()
-    anchor_is_url = anchor_lc.startswith(("http://", "https://", "www."))
+    # URL-like anchors include BARE domains ("eufy.com", "wyze.com/SCPrecall",
+    # "ring.com/support") — the writer cites portals this way constantly. These
+    # are site references, never product mentions; routing them to an Amazon
+    # search hijacks things like a fire-recall refund portal into a nonsense
+    # search page (shipped live on quvii before this guard — ~40 links).
+    anchor_is_url = bool(
+        anchor_lc.startswith(("http://", "https://", "www."))
+        or re.match(r"^[a-z0-9][a-z0-9.-]*\.[a-z]{2,6}(/\S*)?$", anchor_lc)
+    )
     if not anchor_is_url:
         for brand in rule.brand_patterns:
             if not brand:
