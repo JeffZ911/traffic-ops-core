@@ -60,68 +60,133 @@ def _upcoming(today: date, horizon_weeks: int = 8) -> list[str]:
 
 
 
-GIFT_TREND_PROMPT = """You are a real-time trend researcher for iMade4U, a
-store of PERSONALIZED gifts (engraved jewelry, custom keychains, pet portraits
-& memorials, custom home decor).
+GIFT_TREND_PROMPT = """You are an SEO researcher for iMade4U, a small, low-authority
+STORE of PERSONALIZED gifts (engraved jewelry, custom keychains, pet portraits &
+memorials, custom home decor). Today: {today}.
 
-USE GOOGLE SEARCH to find what is RISING RIGHT NOW (last 7-14 days) in
-consumer gifting: viral/TikTok-famous personalized gift formats, pop-culture
-or aesthetic moments driving gift searches (quote the real trend), newly
-surging occasion searches, gift-related shopping events. Today: {today}.
+imade4u is tiny and can ONLY rank on hyper-specific product-ATTRIBUTE long-tails
+that Etsy/Amazon/Pinterest don't target individually. Its own Google data proves
+every earned impression carries a specific ATTRIBUTE. So do NOT chase viral
+aesthetics — find CURRENT gifting demand and express it as attribute x moment.
+
+WINNING FORMULA (non-negotiable) — product ATTRIBUTE x (occasion | recipient):
+1. ATTRIBUTE LEG (REQUIRED, lead with it): a material/gemstone/shape/technique —
+   {attributes}
+2. SECOND LEG (>=1): an OCCASION (+year if timely) or a RECIPIENT.
+USE GOOGLE SEARCH only to confirm the OCCASION/RECIPIENT angle is genuinely
+current (an upcoming holiday, a real gifting moment) — NOT to find a viral look.
 
 HARD RULES:
-- Only trends you can back with a REAL current source — never invent a trend,
-  celebrity moment, or statistic.
-- WRITABILITY: the downstream writer has NO web access and cannot cite
-  sources, so frame every topic as a STYLE/AESTHETIC/OCCASION angle that can
-  be written without asserting a specific celebrity/event as fact.
-  Good: "Bow-Detail 'Coquette' Name Necklaces: This Season's It-Gift"
-  Bad:  "Where to Buy the Necklace Seen on <Celebrity>" (unwritable — the
-  writer can't substantiate the sighting and the factual gate will reject it).
-- CATALOG REALITY: anchor titles on the OCCASION/STYLE/RECIPIENT, never on a
-  specific exotic product format (e.g. "soundwave rings", "hologram lockets")
-  — if the store doesn't carry that exact format, the article becomes a
-  bait-and-switch and gets rejected. Stick to the broad product types listed.
-- Every topic must be writable with our product types: {cats}
+- BAN pure aesthetic/mood framings with no product-search demand: "Coquette",
+  "Solar-Punk", "Office Siren", "Gilded Age", "Lemon-Core", "Coastal", "Grandma
+  Chic", "Dopamine Decor", "Digital Detox". These earn ZERO clicks — never use.
+- BAN bare attribute-less head terms Etsy/Amazon own: "name necklace",
+  "custom mug", "personalized gifts". "sterling silver photo projection necklace
+  for anniversary" = YES; "trending name necklaces" = NO.
+- WRITABILITY: the downstream writer has NO web access — frame around the
+  attribute + occasion/recipient (both writable from product titles), never a
+  celebrity sighting or an unverifiable event.
+- CATALOG REALITY: the match nouns must recall REAL stocked products
+  (necklace/bracelet/ring/mug/pillow/ornament/blanket/pet portrait); never a
+  format the store lacks (no "soundwave rings", "hologram lockets").
+- Every topic writable with our product types: {cats}
 - DISTINCT angles, no near-duplicates of: {existing}
 
 Return exactly {n} topics. Reply ONLY with a JSON array (no fence), each:
-{{"title": "<specific blog title, 50-70 chars>",
-  "type": "<occasion_guide|recipient_guide|buying_guide>" (NO how_to — trend articles are multi-product gift LISTS, single-product how-tos fail the gate),
+{{"title": "<attribute x occasion/recipient title, 50-70 chars>",
+  "type": "<occasion_guide|recipient_guide|buying_guide>" (NO how_to — trend articles are multi-product gift LISTS),
   "match": "<2-4 SHORT single-word product nouns, e.g. necklace, keychain>",
   "tags": "<2-4 comma tags, lowercase-hyphen>",
   "priority": <80-95>}}
 """
 
-PROMPT = """You are an SEO content planner for iMade4U, a store of PERSONALIZED
-gifts. Generate {n} DISTINCT, specific gift-guide blog topics — each a unique
-angle (occasion, recipient, product type, or REAL-TIME TREND). No near-dupes.
+PROMPT = """You are an SEO content planner for iMade4U, a small, low-authority
+STORE of PERSONALIZED gifts. Generate {n} DISTINCT gift-guide topics. No near-dupes.
 
-Ground every topic in these real product categories:
-  {cats}
+WINNING FORMULA (non-negotiable) — product ATTRIBUTE x (recipient | occasion):
+imade4u is tiny; it can ONLY rank on hyper-specific 4-6-word long-tails that big
+aggregators (Etsy/Amazon/Pinterest) don't target individually. Its own Google
+data proves every earned impression carries a specific product ATTRIBUTE.
+1. ATTRIBUTE LEG (REQUIRED, lead with it) — a material/gemstone/shape/technique:
+     {attributes}
+2. SECOND LEG (>=1 of): a RECIPIENT ("for mom", "for couples", "for daughter",
+   "to my man") OR an OCCASION+year ("anniversary", "first father's day",
+   "father's day {year}").
+Every title MUST have the attribute leg + at least one second leg, and must map
+to REAL stocked products in: {cats}
 
-USE GOOGLE SEARCH to weave in what is ACTUALLY TRENDING RIGHT NOW in gifting
-(last ~30 days): viral / TikTok-famous personalized gift types, pop-culture or
-news-driven gifting moments, "{year} gift trends", surging gift searches. Make
-~1/3 of the topics these real, current trends (mark them type=occasion_guide or
-buying_guide, priority 80-90). Only use a trend you can back with a real source.
-
-{seasonal}
+HARD BANS:
+- NO bare attribute-less head terms — these are owned by Etsy/Amazon and waste
+  our effort: {banned}. "sterling silver photo projection necklace" = YES;
+  "name necklace" / "custom mug" / "personalized gifts" = NO.
+- NO aesthetic/Pinterest-mood framings with no product-search demand ("Lemon-Core
+  Kitchen", "Tennis-Core Chic", "Grandma Chic", "Midimalist Home",
+  "Christmas in July", "Dopamine Decor", "Coastal Chic"). These earn ZERO clicks.
+- The `match` nouns MUST recall real stocked products (necklace/bracelet/ring/
+  mug/pillow/ornament/blanket/pet portrait — the store's actual catalog).
+{proven}
+USE GOOGLE SEARCH only to confirm a real occasion/recipient angle is current —
+not to chase viral aesthetics. {seasonal}
 
 Pillars (article_type): occasion_guide, recipient_guide, pet_memorial,
-sympathy_guide, buying_guide, how_to.
+sympathy_guide, buying_guide.
 
 Do NOT duplicate these existing topics (case-insensitive):
 {existing}
 
 Reply ONLY with a JSON array (no markdown fence), each element:
-{{"title": "<specific blog title, 50-70 chars>",
+{{"title": "<specific attribute x recipient/occasion title, 50-70 chars>",
   "type": "<one pillar>",
   "match": "<2-4 SHORT single-word product nouns to pick products, e.g. necklace, mug, keychain — NOT phrases like 'custom photo mug'>",
   "tags": "<2-4 comma article tags, lowercase-hyphen>",
-  "is_trend": <true if this is a REAL-TIME/viral/news/cultural trend; false for evergreen or fixed-calendar topics>,
-  "priority": <integer 60-90; trending/seasonal/high-intent higher>}}
+  "is_trend": <true only for a REAL current occasion/recipient moment; false for evergreen>,
+  "priority": <integer 60-90; attribute+occasion+recipient (3 legs) highest>}}
 """
+
+
+# Catalog ATTRIBUTES — the proven low-competition NARROWER (the gifts analogue
+# of quvii's brand term). Every generated topic must lead with one of these
+# (material / gemstone / shape / technique), because imade4u's own GSC shows
+# EVERY earned impression carries an attribute long-tail, while bare head terms
+# ("name necklace", "custom mug") are owned by Etsy/Amazon/Pinterest.
+_ATTRIBUTE_HINTS = (
+    "sterling silver, 14k gold, gold vermeil, rose gold, photo projection, "
+    "birthstone, baguette, infinity, bar, coordinate/GPS, handwriting, "
+    "engraved, celestial/zodiac, octagon, minimalist/dainty, bubble"
+)
+# Bare head terms Etsy/Amazon own — NEVER target these attribute-less.
+_HEAD_TERM_BAN = (
+    "name necklace, custom mug, personalized gifts, custom necklace, "
+    "photo pillow, custom blanket, personalized jewelry, gift ideas"
+)
+
+
+def _proven_demand(site_id: str, days: int = 30, limit: int = 20) -> str:
+    """Real imade4u GSC queries already earning impressions (any position) — the
+    PROVEN low-competition demand to EXTEND, so generation grounds on what the
+    store already ranks for instead of inventing Pinterest aesthetics. Returns a
+    prompt block, or '' if GSC is unavailable (best-effort)."""
+    try:
+        from datetime import timedelta
+        from googleapiclient.discovery import build
+        from src.utils.google_oauth import get_user_credentials
+        svc = build("searchconsole", "v1", credentials=get_user_credentials(),
+                    cache_discovery=False)
+        rows = svc.searchanalytics().query(siteUrl="sc-domain:imade4u.com", body={
+            "startDate": (date.today() - timedelta(days=days)).isoformat(),
+            "endDate": date.today().isoformat(), "dimensions": ["query"],
+            "rowLimit": 60}).execute().get("rows", [])
+        # keep multi-word commercial queries, drop brand-navigational noise
+        skip = {"ima4u", "imade it", "md4u", "imaderp foryou", "imade4u"}
+        qs = [r["keys"][0] for r in rows
+              if r["keys"][0].lower() not in skip and len(r["keys"][0].split()) >= 2]
+        if not qs:
+            return ""
+        return ("\nPROVEN DEMAND — imade4u ALREADY earns impressions for these real "
+                "queries (extend/adjacent them; do NOT invent aesthetics unrelated "
+                "to these):\n" + "\n".join(f"  - {q}" for q in qs[:limit]) + "\n")
+    except Exception:  # noqa: BLE001 — grounding is a bonus, never fatal
+        return ""
 
 
 def main() -> int:
@@ -166,7 +231,8 @@ def main() -> int:
                 if occ else "No major gift occasion is imminent; focus on evergreen "
                 "pillars (pet memorial, sympathy, recipient, buying guides).")
     prompt = PROMPT.format(n=args.target, cats=PRODUCT_CATS, seasonal=seasonal,
-                           year=date.today().year,
+                           year=date.today().year, attributes=_ATTRIBUTE_HINTS,
+                           banned=_HEAD_TERM_BAN, proven=_proven_demand(site_id),
                            existing="\n".join(f"  - {k}" for k in existing[:50]) or "  (none)")
 
     # Self-improvement loop: inject the latest AI guidance (from qdf_report's
@@ -194,7 +260,19 @@ def main() -> int:
         data = json.loads(text)
     except Exception:
         i, j = text.find("["), text.rfind("]")
-        data = json.loads(text[i:j + 1]) if i >= 0 else []
+        try:
+            data = json.loads(text[i:j + 1]) if i >= 0 else []
+        except Exception:
+            # grounded gemini-flash prepends prose / truncates → salvage objects
+            import re as _re
+            data = []
+            for m in _re.findall(r"\{[^{}]*\}", text):
+                try:
+                    data.append(json.loads(m))
+                except Exception:
+                    continue
+            if data:
+                print(f"   ⚠️  top-up salvaged {len(data)} object(s)")
     if isinstance(data, dict):
         data = next((v for v in data.values() if isinstance(v, list)), [])
 
@@ -239,7 +317,9 @@ def _gift_trend_scan(site_id, existing: list, args) -> int:
     from src.utils.llm import get_llm_provider
     prompt = GIFT_TREND_PROMPT.format(
         today=date.today().isoformat(), cats=PRODUCT_CATS, n=8,
+        attributes=_ATTRIBUTE_HINTS,
         existing=", ".join(list(existing)[:30]) or "(none)")
+    prompt += _proven_demand(site_id)
     try:
         from src.utils.qdf_memory import latest_qdf_guidance
         g = latest_qdf_guidance(site_id)
@@ -258,7 +338,19 @@ def _gift_trend_scan(site_id, existing: list, args) -> int:
     try:
         data = _json.loads(t[i:j + 1]) if i >= 0 else []
     except Exception:
-        print("  ⚠️  gift trend parse failed"); return 0
+        # Grounded gemini-flash often prepends prose / truncates the array —
+        # salvage every COMPLETE {...} object rather than lose the whole scan.
+        import re as _re
+        data = []
+        for m in _re.findall(r"\{[^{}]*\}", t):
+            try:
+                data.append(_json.loads(m))
+            except Exception:
+                continue
+        if data:
+            print(f"  ⚠️  trend output salvaged {len(data)} object(s)")
+        else:
+            print("  ⚠️  gift trend parse failed"); return 0
     have = {k.lower() for k in existing}
     valid = {"occasion_guide", "recipient_guide", "buying_guide"}
     n = 0

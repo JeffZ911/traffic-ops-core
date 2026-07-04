@@ -51,7 +51,8 @@ def _fresh_trend_pages(site_id: str, days: int) -> list[tuple[str, str, int, str
               join article_keywords ak on ak.article_id = a.id
               join keywords k on k.id = ak.keyword_id
              where a.site_id = %s and a.status = 'published'
-               and a.published_url is not null and k.source = 'trend'
+               and a.published_url is not null
+               and k.source in ('trend','gift_seasonal','product_target','collection_target')
                and a.published_at >= now() - %s * interval '1 day'
              order by 3 asc
             """,

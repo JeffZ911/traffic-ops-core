@@ -59,6 +59,14 @@ the opposite):
   occasions in general terms instead.
 - Weave product links into the prose naturally across the gift ideas — every
   recommended gift idea links its product (6+ linked products per article).
+- ANCHOR TEXT: link products/collections using DESCRIPTIVE attribute phrases
+  (e.g. "sterling silver photo projection necklace", "birthstone name necklace")
+  — NEVER "click here", "this product", or a bare product code. Attribute-rich
+  anchors are how a store page earns the long-tail it deserves.
+- When a natural category exists, ALSO link the matching collection page once
+  in the intro or a section header as a browsable option, e.g.
+  [photo projection necklaces](https://imade4u.com/collections/HANDLE) — but
+  ONLY if a collection handle is given below; never invent a collection URL.
 - Near the end include `## Frequently Asked Questions` with 3-4 `###`
   questions gift shoppers actually ask about this occasion/product type,
   each answered in 2-3 sentences (same factual rules — no invented policies,
