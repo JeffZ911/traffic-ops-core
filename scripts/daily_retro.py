@@ -117,6 +117,11 @@ impressions when you issued the directive vs now):
 Context: these sites mass-produce high-QA content; the binding constraint is
 crawl/indexing + ranking AUTHORITY, not volume/quality. Impressions lag
 indexing; clicks lag rankings; GSC settles ~3 days late (last 1-2 days read low).
+REALITY CHECKS (do not suggest these — they don't exist / were retired): Google
+has NO bulk indexing API for general content (indexing comes from authority +
+internal links + sitemaps + backlinks, not an API); manual GSC Request-Indexing
+was retired as ineffective. imade4u affiliate is irrelevant (it sells its own
+products); quvii/ntecodex/pixelmatch monetize via Amazon affiliate + future ads.
 
 Levers you may direct (tag each directive with exactly one):
 - keyword_guidance : what angles/attributes the keyword generators should favor
