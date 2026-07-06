@@ -84,3 +84,28 @@ def latest_qdf_guidance(site_id: UUID | str) -> Optional[str]:
         )
         row = cur.fetchone()
     return row[0] if row and row[0] else None
+
+
+# ── Director channel: the portfolio optimization director (daily_retro) writes
+# per-site keyword-lever directives here; the keyword generators read them
+# ADDITIVELY alongside the qdf guidance. Kept separate so the director and the
+# per-site qdf loop never clobber each other's guidance.
+def save_director_guidance(site_id: UUID | str, guidance: str, *, model: str = "") -> None:
+    store_raw(site_id, "gsc", date.today(),
+              {"director_guidance": {"guidance": (guidance or "")[:3000],
+                                     "model": model, "date": date.today().isoformat()}})
+
+
+def latest_director_guidance(site_id: UUID | str) -> Optional[str]:
+    """Most-recent non-empty director keyword directive for the site, or None."""
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """select payload->'director_guidance'->>'guidance'
+                 from metrics_raw
+                where site_id = %s and source = 'gsc'
+                  and payload ? 'director_guidance'
+                  and coalesce(payload->'director_guidance'->>'guidance','') <> ''
+                order by metric_date desc, id desc limit 1""",
+            (str(site_id),))
+        row = cur.fetchone()
+    return row[0] if row and row[0] else None

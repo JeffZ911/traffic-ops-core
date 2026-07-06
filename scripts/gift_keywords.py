@@ -243,12 +243,16 @@ def main() -> int:
     # retrospective on how imade4u's trend pages performed) so topic selection
     # learns what actually wins traffic.
     try:
-        from src.utils.qdf_memory import latest_qdf_guidance
+        from src.utils.qdf_memory import latest_qdf_guidance, latest_director_guidance
         g = latest_qdf_guidance(site_id)
         if g:
             prompt += ("\n\nLEARNINGS FROM OUR RECENT PERFORMANCE (apply these — "
                        "derived from how our last gift trend posts actually did):\n" + g + "\n")
             print("   🧠 injected prior QDF guidance")
+        dg = latest_director_guidance(site_id)
+        if dg:
+            prompt += ("\n\nDIRECTOR DIRECTIVE (portfolio optimizer — apply):\n" + dg + "\n")
+            print("   🤖 injected director keyword directive")
     except Exception:
         pass
 

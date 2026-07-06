@@ -101,37 +101,58 @@ def _imp(svc, prop, s, e):
         return (0, 0)
 
 
-_PROMPT = """You are the head of SEO for a portfolio of 4 young, low-authority
-content sites. TODAY IS {today}. Below is today's snapshot of every site:
-volume (articles published in 7 days), quality (avg QA 0-10), Google
-impressions this settled week vs the prior week, click count, index-coverage
-split (indexed / discovered-not-indexed / unknown-to-Google), and the single
-top impression page.
+_PROMPT = """You are the autonomous optimization DIRECTOR for a portfolio of 4
+young, low-authority SEO sites. TODAY IS {today}. Your job: judge what to
+optimize next to raise impressions→clicks, and — critically — LEARN from whether
+your OWN past directives actually moved the numbers (self-evolution).
 
-PORTFOLIO DATA (JSON):
+PORTFOLIO DATA (JSON) — per site: 7-day publish volume, avg QA, impressions this
+settled week vs prior week, clicks, index-coverage split, top page:
 {data}
 
-Context you must apply: these sites mass-produce high-QA content, but the
-binding constraint is crawl/indexing + ranking authority, NOT content volume or
-quality. Impressions lag indexing; clicks lag rankings; GSC settles ~3 days
-late so the most recent 1-2 days read low.
+HOW YOUR PAST DIRECTIVES PERFORMED (your self-evolution scorecard — the site's
+impressions when you issued the directive vs now):
+{scorecard}
 
-Write a portfolio retrospective. Be concrete, name sites, cite the numbers, and
-do NOT pad with caveats about data being early. Return ONLY JSON (no fence):
+Context: these sites mass-produce high-QA content; the binding constraint is
+crawl/indexing + ranking AUTHORITY, not volume/quality. Impressions lag
+indexing; clicks lag rankings; GSC settles ~3 days late (last 1-2 days read low).
+
+Levers you may direct (tag each directive with exactly one):
+- keyword_guidance : what angles/attributes the keyword generators should favor
+    or avoid next (this lever AUTO-EXECUTES — it is injected into generation).
+- internal_links / content_structure : how articles should link/structure.
+- product_seo : rewrite a store product/collection page's SEO (imade4u only).
+- affiliate_placement : where/how to place monetization links.
+- indexing_push : crawl/indexing tactics.
+- backlinks : off-site authority (a human to-do).
+- other.
+
+Return ONLY JSON (no fence):
 {{
-  "health": "<1 sentence: overall portfolio trajectory>",
-  "retrospective": "<4-7 sentences: which sites are progressing and which are stalled, what the numbers say is working vs not, cross-site patterns. Reference real figures.>",
-  "top_actions": ["<action 1>", "<action 2>", "<action 3>"]
+  "health": "<1 sentence: portfolio trajectory>",
+  "self_evaluation": "<2-4 sentences grounded in the SCORECARD: which of my past levers moved impressions and which didn't, and what I am therefore changing. If no scorecard yet, say so.>",
+  "retrospective": "<3-5 sentences: what's working vs stalled per site, cross-site patterns, real figures.>",
+  "directives": [
+    {{"site": "<domain or 'portfolio'>",
+      "lever": "<one lever from the list>",
+      "action": "<concrete, specific instruction — not a platitude>",
+      "rationale": "<why, citing a number>",
+      "target_metric": "<the metric this should move, e.g. 'quvii impressions'>",
+      "confidence": <integer 0-100>}}
+  ]
 }}
+Give 4-7 directives, highest-leverage first. Make keyword_guidance directives
+per-SITE and actionable (they are fed verbatim to that site's generator).
 """
 
 
-def _ai_retro(records: list[dict], model: str) -> dict:
+def _ai_retro(records: list[dict], scorecard: str, model: str) -> dict:
     from src.utils.llm import get_llm_provider
     provider = get_llm_provider("gemini")
-    prompt = _PROMPT.format(today=date.today().isoformat(),
+    prompt = _PROMPT.format(today=date.today().isoformat(), scorecard=scorecard or "  (no prior directives yet — first run)",
                             data=json.dumps(records, ensure_ascii=False, indent=1))
-    resp = provider.generate(prompt=prompt, model=model, max_tokens=3000,
+    resp = provider.generate(prompt=prompt, model=model, max_tokens=4000,
                              temperature=0.3, json_mode=True)
     text = (resp.text or "").strip()
     if text.startswith("```"):
@@ -145,10 +166,47 @@ def _ai_retro(records: list[dict], model: str) -> dict:
     return obj
 
 
+def _scorecard(cur, records: list[dict], lookback_days: int = 8) -> str:
+    """Self-evolution feedback: pull the director's directives from ~3-8 days ago
+    and grade each by whether its site's weekly impressions rose since. This is
+    what makes the loop LEARN instead of repeating advice that never worked."""
+    cur.execute(
+        """select metric_date, payload->'daily_retro'
+             from metrics_raw
+            where payload ? 'daily_retro'
+              and metric_date <= current_date - 3
+              and metric_date >= current_date - %s
+            order by metric_date desc limit 3""",
+        (lookback_days,))
+    now_impr = {r["site"]: r.get("impressions_this_week", 0) for r in records}
+    lines = []
+    for mdate, dr in cur.fetchall():
+        if not dr:
+            continue
+        at_issue = {s.get("site"): s.get("impressions_this_week", 0)
+                    for s in (dr.get("stats") or [])}
+        for d in (dr.get("directives") or [])[:6]:
+            site = d.get("site", "")
+            was, now = at_issue.get(site), now_impr.get(site)
+            if was is None or now is None:
+                moved = "n/a"
+            elif now > was * 1.15:
+                moved = f"UP {was}→{now}"
+            elif now < was * 0.85:
+                moved = f"DOWN {was}→{now}"
+            else:
+                moved = f"flat {was}→{now}"
+            lines.append(f"  [{mdate} · {d.get('lever','?')} · {site}] {moved} — "
+                         f"{(d.get('action') or '')[:80]}")
+    return "\n".join(lines[:12])
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="gemini-3.1-pro-preview")
     ap.add_argument("--no-ai", action="store_true")
+    ap.add_argument("--no-route", action="store_true",
+                    help="don't auto-inject keyword_guidance directives into generation")
     args = ap.parse_args()
 
     svc = None
@@ -163,9 +221,10 @@ def main() -> int:
 
     with get_db_connection() as conn, conn.cursor() as cur:
         records = [_site_stats(cur, svc, d) for d in SITES]
-        cur.execute("select id from sites where domain=%s", (SITES[0],))
-        host = cur.fetchone()
-        host_id = str(host[0]) if host else None
+        scorecard = _scorecard(cur, records)
+        cur.execute("select domain, id from sites")
+        site_ids = {d: str(i) for d, i in cur.fetchall()}
+        host_id = site_ids.get(SITES[0])
 
     print(f"📊 Portfolio daily retrospective — {date.today()}")
     for r in records:
@@ -175,26 +234,53 @@ def main() -> int:
               f"clk={r.get('clicks_this_week')} idx={cov.get('pct_indexed','?')}%")
 
     retro = {}
+    directives = []
     if not args.no_ai:
         try:
-            retro = _ai_retro(records, args.model)
+            retro = _ai_retro(records, scorecard, args.model)
+            directives = [d for d in (retro.get("directives") or []) if isinstance(d, dict)]
             print(f"\n🤖 {retro.get('health','')}")
+            if retro.get("self_evaluation"):
+                print(f"   🧬 自评: {retro['self_evaluation']}")
             print(f"   {retro.get('retrospective','')}")
-            for i, a in enumerate(retro.get("top_actions", []), 1):
-                print(f"   {i}. {a}")
+            for d in directives:
+                print(f"   • [{d.get('lever','?')}·{d.get('site','')}·conf{d.get('confidence','?')}] "
+                      f"{d.get('action','')}")
             print(f"   (model={args.model}, cost ${retro.get('_cost',0):.4f})")
         except Exception as e:  # noqa: BLE001 — never let the AI step break the log
-            print(f"  ⚠️  AI retro skipped: {type(e).__name__}: {str(e)[:120]}")
+            print(f"  ⚠️  AI director skipped: {type(e).__name__}: {str(e)[:120]}")
+
+    # ── AUTONOMOUS ARM (safe lever only): keyword_guidance directives auto-inject
+    # into that site's generator via the director channel — the same gated path
+    # the qdf loop already uses. Every OTHER lever (product_seo/affiliate/links/
+    # backlinks) is LOGGED for human review, never auto-executed.
+    routed = 0
+    if directives and not args.no_route:
+        from src.utils.qdf_memory import save_director_guidance
+        by_site: dict[str, list[str]] = {}
+        for d in directives:
+            if d.get("lever") == "keyword_guidance" and d.get("site") in site_ids:
+                by_site.setdefault(d["site"], []).append(d.get("action", ""))
+        for domain, actions in by_site.items():
+            txt = " ".join(a for a in actions if a).strip()
+            if txt:
+                save_director_guidance(site_ids[domain], txt, model=args.model)
+                routed += 1
+        if routed:
+            print(f"\n  🤖 auto-routed keyword_guidance to {routed} site(s); "
+                  f"{len(directives)-sum(1 for d in directives if d.get('lever')=='keyword_guidance')} "
+                  f"other directive(s) logged for human review")
 
     if host_id:
         store_raw(host_id, "gsc", date.today(), {"daily_retro": {
             "date": date.today().isoformat(),
             "health": retro.get("health", ""),
+            "self_evaluation": retro.get("self_evaluation", ""),
             "retrospective": retro.get("retrospective", ""),
-            "top_actions": retro.get("top_actions", []),
+            "directives": directives, "routed_keyword_sites": routed,
             "stats": records, "model": args.model,
         }})
-        print("\n  ✓ retrospective logged (metrics_raw 'daily_retro')")
+        print("  ✓ directives logged (metrics_raw 'daily_retro')")
     return 0
 
 

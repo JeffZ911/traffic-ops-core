@@ -419,7 +419,7 @@ def run_trending(site_id: UUID, config: dict, existing: set[str], args) -> int:
     # retrospective on how past trend pages performed) so each generation
     # builds on what actually won impressions — knowledge flows day to day.
     try:
-        from src.utils.qdf_memory import latest_qdf_guidance
+        from src.utils.qdf_memory import latest_qdf_guidance, latest_director_guidance
         _guidance = latest_qdf_guidance(site_id)
         if _guidance:
             prompt += (
@@ -428,6 +428,11 @@ def run_trending(site_id: UUID, config: dict, existing: set[str], args) -> int:
                 "Google; favour what worked, avoid what didn't):\n" + _guidance + "\n"
             )
             print("   🧠 injected prior QDF guidance into the trend prompt")
+        _director = latest_director_guidance(site_id)
+        if _director:
+            prompt += ("\n\nDIRECTOR DIRECTIVE (portfolio optimizer — apply):\n"
+                       + _director + "\n")
+            print("   🤖 injected director keyword directive")
     except Exception as _e:  # noqa: BLE001 — guidance is an enhancement, never fatal
         print(f"   ⚠️  guidance inject skipped: {type(_e).__name__}")
 
