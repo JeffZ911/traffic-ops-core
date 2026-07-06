@@ -67,6 +67,10 @@ the opposite):
   in the intro or a section header as a browsable option, e.g.
   [photo projection necklaces](https://imade4u.com/collections/HANDLE) — but
   ONLY if a collection handle is given below; never invent a collection URL.
+- INTERNAL LINKS: where genuinely relevant, weave in 1-2 links to these RELATED
+  guides (builds our internal link mesh). Use descriptive attribute anchors,
+  never "read more". Only link ones that truly fit the topic; never invent a URL.
+{related}
 - Near the end include `## Frequently Asked Questions` with 3-4 `###`
   questions gift shoppers actually ask about this occasion/product type,
   each answered in 2-3 sentences (same factual rules — no invented policies,
@@ -152,17 +156,23 @@ def _embed_product_images(body_md: str, by_handle: dict) -> str:
 
 
 def build_article(topic: str, match: list[str], extra_tags: list[str] | None = None,
-                  model: str = "gemini-3.1-pro-preview") -> dict | None:
+                  model: str = "gemini-3.1-pro-preview",
+                  related: list[dict] | None = None) -> dict | None:
     """Generate one gift-guide article (no publish). Returns a dict with the
     finished body (real product links + inline product photos), SEO fields,
     hero image, and metrics — or None on failure. Reused by the CLI sample and
-    the content_imade4u pipeline."""
+    the content_imade4u pipeline. `related` = [{title,url}] sibling guides the
+    writer may internal-link (builds the blog link mesh that nudges pos-10-18
+    pages up)."""
     prods = _products([m for m in match if m])
     if not prods:
         return None
     by_handle = {p["handle"]: p for p in prods}
     plist = "\n".join(f"  - {p['title']} — {p['handle']}" for p in prods)
-    prompt = PROMPT.format(topic=topic, products=plist, trusted_refs=TRUSTED_REFS)
+    rel_block = "\n".join(f"  - [{r['title']}]({r['url']})" for r in (related or [])
+                          if r.get("title") and r.get("url")) or "  (none yet)"
+    prompt = PROMPT.format(topic=topic, products=plist, trusted_refs=TRUSTED_REFS,
+                           related=rel_block)
 
     # A full ~1300-word body inside a JSON field is token-heavy; give Pro room
     # and retry once if the response truncates / isn't valid JSON.

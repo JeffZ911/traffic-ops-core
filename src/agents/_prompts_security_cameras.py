@@ -121,6 +121,22 @@ for security cameras, frustrated with the subscription-heavy incumbents
 
 {factual_rules}
 
+COMMERCIAL PLACEMENT (affiliate) — earn the click without hurting trust:
+- If (and ONLY if) this article is a troubleshooting / problem / "not working" /
+  overheating / firmware / battery / outage / recall piece, the resolution
+  section (e.g. "What to do now" / "Value vs alternatives") MUST include exactly
+  ONE genuine commercial recommendation at the natural decision point — the
+  moment a reader realizes they may need to replace or supplement the device:
+    * an UPGRADE/ALTERNATIVE camera ("if it's out of warranty or beyond repair,
+      a solid current pick is <specific real model>"), OR
+    * a relevant ACCESSORY that fixes the problem (microSD card, solar panel,
+      weatherproof mount, surge protector, heat-shade) — named as a real model.
+- Name a SPECIFIC, real, current product (brand + model) so it becomes a useful
+  affiliate link — never a vague "a good camera". Exactly one; do not stuff.
+- Do NOT force a product into pure news, explainer, or FAQ-only articles — a
+  forced buy pitch there reads as spam and hurts E-E-A-T. Recommend only where a
+  buyer genuinely stands at a replace/upgrade decision.
+
 Your task: generate an outline for a single article.
 
 Keyword (target search query): {keyword}

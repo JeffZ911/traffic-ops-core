@@ -137,6 +137,13 @@ def main() -> int:
         picks = cur.fetchall()
         cur.execute("select lower(title) from articles where site_id=%s and status='published'", (site_id,))
         published_titles = {_norm(r[0]) for r in cur.fetchall()}
+        # Sibling guides for internal linking — build the blog link mesh that
+        # nudges the pos-10-18 pages toward page 1.
+        cur.execute("""select title, published_url from articles
+                        where site_id=%s and status='published' and published_url is not null
+                        order by published_at desc limit 30""", (site_id,))
+        siblings = [{"title": t, "url": u if u.startswith("http") else "https://imade4u.com" + u}
+                    for t, u in cur.fetchall()]
 
     if not picks:
         print("  no planned topics — run bootstrap_imade4u or keyword top-up"); return 0
@@ -176,7 +183,9 @@ def main() -> int:
         # floats the on-topic products first. Recall gate stays on the broad
         # term above (so we don't let no-stock topics like "canvas" back in).
         match_ranked = match + [topic]
-        art = build_article(topic, match_ranked, tags, model=args.model)
+        # pass sibling guides (excluding this very topic) for internal linking
+        rel = [s for s in siblings if _norm(s["title"]) != _norm(topic)][:8]
+        art = build_article(topic, match_ranked, tags, model=args.model, related=rel)
         if not art:
             print("   ⚠️  generation failed — left planned for retry"); continue
         # mechanical gate
