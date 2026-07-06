@@ -80,6 +80,18 @@ _LINK_RE = re.compile(
 
 Action = Literal["keep", "amazon", "strip"]
 
+# Anchor phrases that mark a SOURCE/citation, not a product mention. A
+# brand-name anchor matching one of these must never become an affiliate search
+# link (it's a reference to a support page / spec sheet / subreddit / help doc /
+# policy / comparison, which no reader clicks to buy).
+_CITATION_ANCHOR_RE = re.compile(
+    r"\b(support|official|specifications?|spec sheets?|specs?|documentation|"
+    r"help(?: ?center| ?desk)?|manual|faq|forum|community|thread|subreddit|"
+    r"reddit|r/[a-z0-9_]+|policy|privacy|terms|guidelines?|advisory|recall|"
+    r"press release|announcement|changelog|release notes|knowledge base|"
+    r"troubleshoot(?:ing)?|api|sdk|whitepaper|datasheet|wiki|source|reference|"
+    r"article|report|study|review by|according to)\b", re.I)
+
 
 @dataclass
 class LinkChange:
@@ -165,7 +177,15 @@ def _classify(anchor: str, url: str, rule: RewriteRule) -> Action:
         anchor_lc.startswith(("http://", "https://", "www."))
         or re.match(r"^[a-z0-9][a-z0-9.-]*\.[a-z]{2,6}(/\S*)?$", anchor_lc)
     )
-    if not anchor_is_url:
+    # CITATION guard: a brand-mentioning anchor that is clearly a SOURCE/reference
+    # (support page, spec sheet, subreddit, help doc, official page, comparison,
+    # policy) is NOT a product recommendation. Affiliate-izing it produced ~186
+    # nonsense Amazon-search links across quvii ("Wyze Support site", "r/Tapo",
+    # "Reolink CX810 Technical Specifications") that never convert and read as
+    # deceptive. Skip the brand→amazon rule for these and let them resolve via
+    # the allowlist (keep a real source) or strip (drop a hallucinated URL).
+    _is_citation = bool(_CITATION_ANCHOR_RE.search(anchor_lc))
+    if not anchor_is_url and not _is_citation:
         for brand in rule.brand_patterns:
             if not brand:
                 continue
