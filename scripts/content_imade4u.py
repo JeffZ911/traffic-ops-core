@@ -120,10 +120,11 @@ def main() -> int:
         cur.execute(
             "select id, keyword, notes from keywords where site_id=%s and status='planned' "
             "and (last_used_at is null or last_used_at < now() - interval '20 hours') "
-            # Freshness bonus also applies to seasonal topics: gifts' QDF IS the
-            # calendar, so a freshly-generated gift_seasonal topic (Father's Day
-            # in June) must surface in its window, not sink under evergreen refill.
-            "order by (coalesce(priority_score,0) + case when source in ('trend','gift_seasonal') then "
+            # PRIMARY SOURCE = the external keyword-strategy library: consume it
+            # first (real GSC-backed quick-wins), self-generated topics only after
+            # it drains. Then the freshness bonus for seasonal/trend topics.
+            "order by (source='external_strategy') desc, "
+            "(coalesce(priority_score,0) + case when source in ('trend','gift_seasonal') then "
             "  case when created_at >= now()-interval '1 day' then 150 "
             "       when created_at >= now()-interval '3 days' then 80 "
             "       when created_at >= now()-interval '7 days' then 30 else 0 end "
@@ -163,16 +164,33 @@ def main() -> int:
             print("   ⏭  near-duplicate of a published title — skipping");
             _set_kw(kid, "skipped"); continue
 
+        # EXTERNAL-STRATEGY handle lock: if the keyword carries a trusted
+        # target_product_handle (notes handle=…), resolve that exact product and
+        # make it the PRIMARY product the article is built around — bypassing the
+        # fuzzy match= picker. A resolved handle also satisfies catalog-reality
+        # (we have a guaranteed real product), so skip the recall gate.
+        pin = None
+        if n.get("handle"):
+            try:
+                from src.integrations.shopify_product import get_product_by_handle
+                p = get_product_by_handle(n["handle"])
+                if p and p.get("status") == "active":
+                    pin = p
+            except Exception:
+                pin = None
+
         # CATALOG-REALITY gate (pre-generation). A topic whose match terms recall
         # fewer than min_links REAL products can NEVER pass the post-write link
         # gate — generating it just burns an LLM call and leaves the pipeline
         # publishing nothing (imade4u went silent 06-17 this way: the keyword
         # generator drifted into categories we don't stock — canvas, wall-art,
         # keychains). Skip such topics up front so the run reaches a viable one.
-        recall = len(_products(match)) if match else 0
-        if recall < args.min_links:
-            print(f"   ⏭  catalog can't support it (recall={recall} < {args.min_links} real products) — skipping")
-            _set_kw(kid, "skipped"); skipped_catalog += 1; continue
+        # A pinned handle already guarantees a real product → skip the gate.
+        if pin is None:
+            recall = len(_products(match)) if match else 0
+            if recall < args.min_links:
+                print(f"   ⏭  catalog can't support it (recall={recall} < {args.min_links} real products) — skipping")
+                _set_kw(kid, "skipped"); skipped_catalog += 1; continue
 
         # Rank the RIGHT products to the top. The stored match is a broad
         # category ("necklace"); for a specific title ("Photo Projection
@@ -185,7 +203,10 @@ def main() -> int:
         match_ranked = match + [topic]
         # pass sibling guides (excluding this very topic) for internal linking
         rel = [s for s in siblings if _norm(s["title"]) != _norm(topic)][:8]
-        art = build_article(topic, match_ranked, tags, model=args.model, related=rel)
+        # external quick-win keyword → put its exact phrase in the title/H1
+        keyword = topic if n.get("type") == "external" else None
+        art = build_article(topic, match_ranked, tags, model=args.model, related=rel,
+                            pin_product=pin, keyword=keyword)
         if not art:
             print("   ⚠️  generation failed — left planned for retry"); continue
         # mechanical gate

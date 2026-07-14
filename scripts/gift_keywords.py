@@ -205,8 +205,20 @@ def main() -> int:
         site_id = str(row[0])
         cur.execute("select count(*) from keywords where site_id=%s and status='planned'", (site_id,))
         planned = cur.fetchone()[0]
+        # External keyword-strategy library is the PRIMARY source (HANDOFF). While
+        # its pool is healthy, skip ALL self-generation (seasonal calendar + trend
+        # scan) — those aesthetic self-picks are the zero-click culprit. Auto-
+        # resumes when the external pool drains below the floor.
+        cur.execute("select count(*) from keywords where site_id=%s and status='planned' "
+                    "and source='external_strategy'", (site_id,))
+        external_planned = cur.fetchone()[0]
         cur.execute("select keyword from keywords where site_id=%s order by created_at desc limit 60", (site_id,))
         existing = [r[0] for r in cur.fetchall()]
+
+    if external_planned >= 6 and not args.force:
+        print(f"  external_strategy pool healthy ({external_planned} planned) — "
+              f"skipping self-generation (seasonal + trend). Consuming the strategy library.")
+        return 0
 
     # Fetch the real GSC proven-demand block ONCE and share it (one API call for
     # both the trend scan and the top-up prompt).

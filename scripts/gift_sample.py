@@ -39,7 +39,7 @@ custom keychains, pet portraits & memorials, custom home decor).
 
 Write ONE genuinely useful, DISTINCT gift guide on this topic:
   "{topic}"
-
+{directives}
 Hard quality rules (this store was hurt by thin, repetitive AI content — do
 the opposite):
 - Every gift idea must be DISTINCT and specific, with a real reason it's
@@ -157,22 +157,37 @@ def _embed_product_images(body_md: str, by_handle: dict) -> str:
 
 def build_article(topic: str, match: list[str], extra_tags: list[str] | None = None,
                   model: str = "gemini-3.1-pro-preview",
-                  related: list[dict] | None = None) -> dict | None:
+                  related: list[dict] | None = None,
+                  pin_product: dict | None = None,
+                  keyword: str | None = None) -> dict | None:
     """Generate one gift-guide article (no publish). Returns a dict with the
     finished body (real product links + inline product photos), SEO fields,
     hero image, and metrics — or None on failure. Reused by the CLI sample and
     the content_imade4u pipeline. `related` = [{title,url}] sibling guides the
-    writer may internal-link (builds the blog link mesh that nudges pos-10-18
-    pages up)."""
+    writer may internal-link. `pin_product` = the exact catalog product to build
+    the article AROUND (from an external keyword's target_product_handle).
+    `keyword` = a target query the SEO title/H1 must contain VERBATIM (Tier-1)."""
     prods = _products([m for m in match if m])
+    # pin the exact strategy product to the FRONT (dedup) so it's featured first
+    if pin_product and pin_product.get("handle"):
+        prods = [pin_product] + [p for p in prods if p.get("handle") != pin_product["handle"]]
     if not prods:
         return None
     by_handle = {p["handle"]: p for p in prods}
     plist = "\n".join(f"  - {p['title']} — {p['handle']}" for p in prods)
     rel_block = "\n".join(f"  - [{r['title']}]({r['url']})" for r in (related or [])
                           if r.get("title") and r.get("url")) or "  (none yet)"
+    directives = ""
+    if keyword:
+        directives += (f"\nTARGET KEYWORD (SEO): the SEO title AND the H1 MUST contain "
+                       f'this exact phrase verbatim: "{keyword}". Repeat it naturally '
+                       f"once within the first 100 words. Aim for 1200-1600 words.\n")
+    if pin_product and pin_product.get("handle"):
+        directives += (f"\nPRIMARY PRODUCT — build the guide AROUND this exact product; "
+                       f"link it FIRST and feature it most prominently:\n"
+                       f"  {pin_product['title']} — {pin_product['handle']}\n")
     prompt = PROMPT.format(topic=topic, products=plist, trusted_refs=TRUSTED_REFS,
-                           related=rel_block)
+                           related=rel_block, directives=directives)
 
     # A full ~1300-word body inside a JSON field is token-heavy; give Pro room
     # and retry once if the response truncates / isn't valid JSON.

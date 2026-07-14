@@ -111,6 +111,27 @@ def _itemlist_jsonld(title: str, products: list[dict]) -> Optional[str]:
             + json.dumps(ld, ensure_ascii=False) + "</script>")
 
 
+def _faq_jsonld(content_md: str) -> Optional[str]:
+    """FAQPage JSON-LD parsed from the writer's `## Frequently Asked Questions`
+    section (### question + following answer text) → rich-result (PAA/FAQ)
+    eligibility. Returns a <script> tag, or None when no FAQ section exists."""
+    m = re.search(r"(?ims)^##\s+Frequently Asked Questions\s*$(.*?)(?=^##\s|\Z)", content_md)
+    if not m:
+        return None
+    qas = []
+    for q in re.finditer(r"(?ms)^###\s+(.+?)\s*$\n(.*?)(?=^###\s|\Z)", m.group(1)):
+        question = q.group(1).strip()
+        answer = re.sub(r"\s+", " ", re.sub(r"[#*_>\[\]()]", "", q.group(2))).strip()[:600]
+        if question and answer:
+            qas.append({"@type": "Question", "name": question,
+                        "acceptedAnswer": {"@type": "Answer", "text": answer}})
+    if not qas:
+        return None
+    ld = {"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": qas}
+    return ('<script type="application/ld+json">'
+            + json.dumps(ld, ensure_ascii=False) + "</script>")
+
+
 def publish_article(
     *,
     title: str,
@@ -137,6 +158,9 @@ def publish_article(
         ld_tag = _itemlist_jsonld(title, products)
         if ld_tag:
             body_html += "\n" + ld_tag
+    faq_tag = _faq_jsonld(content_md)   # FAQPage rich-result eligibility
+    if faq_tag:
+        body_html += "\n" + faq_tag
 
     article: dict = {
         "title": title,
