@@ -18,19 +18,16 @@ name: Content Pipeline (pixelmatch.art)
 # the prefix once, never re-author the body.
 
 on:
-  schedule:
-    # Reverted 2→6/day (2026-05-31). With 2/day, GSC impressions started
-    # falling AND the per-cron 'Backfill under-imaged article' step (runs
-    # once/cron) fell 3x behind, leaving new articles without hero images
-    # (black placeholders). 6/day restores generation throughput, image
-    # backfill cadence, and indexing-ping frequency. The daily cap still
-    # bounds article count; extra crons are throughput + retry headroom.
-    - cron: '0 3 * * *'
-    - cron: '0 7 * * *'
-    - cron: '0 11 * * *'
-    - cron: '0 15 * * *'
-    - cron: '0 19 * * *'
-    - cron: '0 23 * * *'
+  # PAUSED 2026-07-14 (Jeff): pixelmatch content generation halted to focus
+  # SEO effort on quvii + imade4u. Schedule commented; re-enable by uncommenting.
+  # workflow_dispatch stays so a manual run is still possible.
+  # schedule:
+  #   - cron: '0 3 * * *'
+  #   - cron: '0 7 * * *'
+  #   - cron: '0 11 * * *'
+  #   - cron: '0 15 * * *'
+  #   - cron: '0 19 * * *'
+  #   - cron: '0 23 * * *'
   workflow_dispatch:
 
 concurrency:
