@@ -198,6 +198,26 @@ jobs:
         # exact-hour gate never matched GitHub cron drift and silently no-op'd.
         run: python -m scripts.keyword_gardener --trending --target 8
 
+      # ------------------------------------------------------------- 2b'.
+      # Footprint expansion (2026-07-14): the trend layer rides breaking
+      # events but keeps re-competing the SAME query clusters, so the site
+      # plateaus at its authority ceiling (~500 impr/day, winners pos 8-11).
+      # This once/day layer mints NEW cohort-tagged keywords that widen query
+      # TERRITORY — brand (A) / problem (B) / intent (C) — as ADDITIVE new URLs
+      # only (never re-edits an indexed page, so it can't trigger the 07-06
+      # re-crawl crash). footprint_report.py reads the cohort tags to show
+      # which axis actually earns fresh impressions. Self-gated (DB marker,
+      # >=20h) so only one of the day's crons actually does the scan.
+      - name: Footprint expansion (keyword gardener --expansion)
+        if: steps.budget.outputs.action != 'pause_all'
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.QUVII_GEMINI_API_KEY }}
+        run: python -m scripts.keyword_gardener --expansion --target 9 --min-interval-hours 20
+
       # ---------------------------------------------------------------- 2b.
       # Estimate keyword competition (LLM, free) → keywords.competition.
       # A zero-authority site can only rank LOW-competition long-tail; this
@@ -216,6 +236,10 @@ jobs:
       # ---------------------------------------------------------------- 3.
       # Article generation — slow-start: 3 articles per cron × 2 crons/day
       # = ~6 articles/day. Bump to batch=4 + 24 cron/day when ramping.
+      # --reserve-source expansion:2 guarantees ~2 footprint-expansion pages
+      # publish per day (brand/problem/intent cohorts) so the trend layer's
+      # high-priority fresh keywords can't crowd the experiment out. Graceful
+      # no-op until run_expansion has seeded the pool.
       - name: Generate articles (batch=3)
         if: steps.budget.outputs.action != 'pause_all'
         env:
@@ -223,7 +247,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           GEMINI_API_KEY: ${{ secrets.QUVII_GEMINI_API_KEY }}
-        run: python -m scripts.run_batch_smoke --count 3 --max-retries 2
+        run: python -m scripts.run_batch_smoke --count 3 --max-retries 2 --reserve-source expansion:2
 
       # ---------------------------------------------------------------- 4.
       - name: Publish article markdown to quvii-site

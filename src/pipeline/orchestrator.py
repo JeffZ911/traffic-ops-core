@@ -338,6 +338,7 @@ def run_one_article(
     log=print,
     max_retry_rounds_override: Optional[int] = None,
     force_article_type: Optional[str] = None,
+    force_source: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Execute the full pipeline for ONE article. Returns a summary dict.
@@ -369,6 +370,10 @@ def run_one_article(
         # post-selector override below stays as a belt-and-suspenders
         # safeguard in case the selector still picks a mismatched keyword.
         sel_input["force_article_type"] = force_article_type
+    if force_source:
+        # Reserved-slice: selector narrows candidates to this keyword source
+        # (footprint-expansion experiment guarantee — see keyword_selector).
+        sel_input["force_source"] = force_source
     sel = selector.run(
         site_id=site_id, article_id=None,
         input_data=sel_input,

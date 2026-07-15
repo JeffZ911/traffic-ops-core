@@ -307,6 +307,78 @@ SECURITY_TREND_TYPES = [
     "camera_news", "camera_buying_guide", "camera_comparison", "camera_learn",
 ]
 
+# ---------------------------------------------------------------------------
+# FOOTPRINT EXPANSION (security_cameras) — 2026-07-14.
+# quvii's daily engine has only two layers today: (1) run_trending, riding
+# real breaking events (source='trend', decays in ~2wk), and (2) a manually
+# seeded evergreen pool (bootstrap_quvii). There is NO systematic generator
+# that widens QUERY TERRITORY — so the site plateaus at its authority ceiling
+# (~500 impr/day, winners pos 8-11) because it keeps re-competing for the same
+# query clusters. This layer mints NEW, ADDITIVE keywords (→ new URLs only; it
+# never touches an indexed page, honouring the "no mass re-edit of live pages"
+# rule that caused the 07-06 re-crawl crash) across three tagged cohorts so we
+# can measure which axis of expansion actually earns fresh impressions:
+#   A = BRAND expansion   (under-covered brands × proven pains)
+#   B = PROBLEM expansion (under-covered problem types × hot brands)
+#   C = INTENT expansion  (comparison / "best X without Y" / discontinued / alt)
+# The incumbent trend+evergreen corpus is the implicit CONTROL cohort ("D").
+# footprint_report.py buckets published pages by cohort tag for the read.
+SECURITY_EXPANSION_TYPES = [
+    "camera_comparison", "camera_buying_guide", "camera_learn",
+    "camera_troubleshoot", "camera_install",
+]
+
+SECURITY_EXPANSION_PROMPT = """You are an SEO strategist for {brand_name}, an
+independent home-security research site (security cameras, video doorbells,
+smart locks, sensors, smart-home security, consumer privacy).
+
+Your job is FOOTPRINT EXPANSION: mint NEW long-tail keywords that open query
+territory we do NOT yet cover, using our proven pattern — a real BRAND × a real
+PRODUCT PROBLEM × clear search intent. These are EVERGREEN troubleshooting /
+comparison / buying queries, NOT breaking-news events (a separate layer handles
+those). Every keyword must be something a real owner would actually type.
+
+Split your output across THREE cohorts. Tag each keyword with its cohort:
+
+  cohort "A" — BRAND EXPANSION: pair brands we UNDER-cover with our proven pain
+     points. Prioritise under-covered brands: Arlo, Blink, Nest / Google Nest,
+     Reolink, SimpliSafe, Tapo, Aqara, Lorex, Kasa, Ubiquiti, Swann. Proven
+     pains: overheating, firmware update failing, battery draining fast, going
+     offline / disconnecting, motion alerts not working, night vision failing,
+     live view lag, notifications delayed, won't connect to wifi.
+
+  cohort "B" — PROBLEM-TYPE EXPANSION: pair PROBLEM types we under-cover with
+     our HOT brands (Eufy, Ring, Wyze, Nest, Arlo). Under-covered problems:
+     wifi / connectivity drops, app outage or won't load, subscription
+     price-hike (what to do / alternatives), false or too-many motion alerts,
+     cloud vs local (SD / NAS) storage, HomeKit / Matter / Alexa pairing,
+     2FA / account lockout, geofencing / auto-arming, RTSP / ONVIF.
+
+  cohort "C" — INTENT / DECISION EXPANSION: high-intent decision queries.
+     Patterns: "<A> vs <B>" head-to-head; "best <camera type> without
+     subscription / without wifi / for apartments / for renters"; "is <model>
+     discontinued"; "<brand> alternative after price increase"; "does <model>
+     work with HomeKit / Alexa / Google Home".
+
+Use Google Search to keep every brand, model, and problem REAL. HARD RULES:
+- Do NOT invent model names, breaches, recalls, prices, or dates. If you can't
+  verify a model exists, use the brand generically instead of a fake model.
+- No video games, gacha, or anime — this is a home-security site.
+- Lowercase, 4-9 words, a query a real person types (not a headline).
+
+Existing keywords (do NOT duplicate, case-insensitive):
+{existing_sample}
+
+Return {n_target} keywords TOTAL, spread roughly evenly across cohorts A/B/C,
+each mapping to ONE of these article types: {types}.
+
+Reply ONLY with a JSON array (no fence), each element:
+{{"keyword": "<lowercase 4-9 words>", "cohort": "A|B|C",
+  "intent": "informational|comparison|how-to|list",
+  "article_type": "<one of the types>", "priority_score": <60-88>,
+  "notes": "<brand + problem + why this is low-competition long-tail>"}}
+"""
+
 
 def _last_trend_scan_hours_ago(site_id: UUID) -> float | None:
     """Hours since the last trend scan for this site (marker in metrics_raw
@@ -331,6 +403,32 @@ def _mark_trend_scan(site_id: UUID) -> None:
     from src.collectors.base import store_raw
     store_raw(site_id, "gsc", _date.today(),
               {"trend_scan": {"at": _dt.now(_tz.utc).isoformat()}})
+
+
+def _last_expansion_scan_hours_ago(site_id: UUID) -> float | None:
+    """Hours since the last footprint-expansion scan (marker key
+    'expansion_scan'), or None if never scanned. Independent of the trend
+    marker so the two layers gate separately."""
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            select extract(epoch from (now() - (payload->'expansion_scan'->>'at')::timestamptz))/3600.0
+              from metrics_raw
+             where site_id = %s and payload ? 'expansion_scan'
+             order by id desc limit 1
+            """,
+            (str(site_id),),
+        )
+        row = cur.fetchone()
+    return float(row[0]) if row and row[0] is not None else None
+
+
+def _mark_expansion_scan(site_id: UUID) -> None:
+    """Persist the expansion-scan timestamp marker (append-only, metrics_raw)."""
+    from datetime import date as _date, datetime as _dt, timezone as _tz
+    from src.collectors.base import store_raw
+    store_raw(site_id, "gsc", _date.today(),
+              {"expansion_scan": {"at": _dt.now(_tz.utc).isoformat()}})
 
 
 def run_trending(site_id: UUID, config: dict, existing: set[str], args) -> int:
@@ -506,6 +604,141 @@ def run_trending(site_id: UUID, config: dict, existing: set[str], args) -> int:
                 print(f"   ⚠️  trend insert skip {kw!r}: {e}")
     print(f"   📈 trend: +{inserted} keyword(s) (cost ${resp.cost_usd:.4f})")
     return inserted
+
+
+def run_expansion(site_id: UUID, config: dict, existing: set[str], args) -> int:
+    """FOOTPRINT EXPANSION (security_cameras only): seed NEW, cohort-tagged
+    keywords that widen query territory (source='expansion'). Every keyword
+    becomes a NEW url — this layer never touches an indexed page, so it is
+    safe under the no-mass-re-edit rule. Cohorts A/B/C are tagged in notes
+    ('[expansion] cohort=X | article_type=Y | ...') so footprint_report can
+    measure which axis earns fresh impressions. Returns rows inserted.
+
+    Self-gates on a DB marker ('expansion_scan') like run_trending, immune to
+    cron drift. Meant for ONE slot/day (pair with --min-interval-hours ~20)."""
+    niche = _niche(config)
+    if niche != "security_cameras":
+        print(f"   🧭 expansion: skipped — only security_cameras (niche={niche})")
+        return 0
+
+    # The shared --min-interval-hours arg defaults to 11 (tuned for the trend
+    # layer's ~2 scans/day). Expansion wants ~1 scan/day, so the cron passes
+    # --min-interval-hours 20 explicitly (see content_quvii.yml). A manual run
+    # without the flag falls back to 11h — harmless (just an extra scan).
+    min_interval = float(args.min_interval_hours or 0)
+    if min_interval > 0:
+        ago = _last_expansion_scan_hours_ago(site_id)
+        if ago is not None and ago < min_interval:
+            print(f"   🧭 expansion scan: skipped — last scan {ago:.1f}h ago "
+                  f"(< {min_interval:.0f}h interval)")
+            return 0
+
+    type_blacklist = list((config.get("content_plan") or {}).get("type_blacklist") or [])
+    allowed = config.get("allowed_article_types") or SECURITY_EXPANSION_TYPES
+    types = [t for t in SECURITY_EXPANSION_TYPES
+             if t in allowed and t not in type_blacklist]
+    if not types:
+        print("   🧭 expansion: no allowed article types after blacklist — skip")
+        return 0
+    brand_name = (config.get("brand") or {}).get("name") or "this home-security site"
+
+    existing_sample = sorted(existing)
+    if len(existing_sample) > 60:
+        existing_sample = existing_sample[:30] + existing_sample[-30:]
+    existing_lines = "\n".join(f"  - {kw}" for kw in existing_sample) or "  (empty pool)"
+
+    prompt = SECURITY_EXPANSION_PROMPT.format(
+        brand_name=brand_name, existing_sample=existing_lines,
+        n_target=args.target, types=", ".join(types),
+    )
+
+    # Apply the same self-improvement guidance the trend layer uses, so the
+    # expander also learns which brand/problem/intent angles actually won.
+    try:
+        from src.utils.qdf_memory import latest_qdf_guidance, latest_director_guidance
+        _guidance = latest_qdf_guidance(site_id)
+        if _guidance:
+            prompt += ("\n\nLEARNINGS FROM OUR RECENT PERFORMANCE (favour what "
+                       "worked, avoid what didn't):\n" + _guidance + "\n")
+        _director = latest_director_guidance(site_id)
+        if _director:
+            prompt += ("\n\nDIRECTOR DIRECTIVE (portfolio optimizer — apply):\n"
+                       + _director + "\n")
+    except Exception as _e:  # noqa: BLE001 — guidance is an enhancement, never fatal
+        print(f"   ⚠️  guidance inject skipped: {type(_e).__name__}")
+
+    provider = get_llm_provider("gemini")
+    text_cfg = config.get("text_provider") or {}
+    model = (text_cfg.get("keyword_research_model")
+             or text_cfg.get("outline_model") or "gemini-3-flash-preview")
+    print(f"   🧭 footprint expansion scan (security) → target {args.target}")
+    resp = provider.generate(prompt=prompt, model=model, max_tokens=6000,
+                             temperature=0.5, json_mode=True, enable_search=True)
+    # Mark the scan NOW — the spend already happened. Mirror run_trending: the
+    # marker must be set before the budget/parse checks below, otherwise an
+    # over-budget or persistently-truncated response would re-burn one LLM call
+    # every single cron (the gate never advances). The day's slot is consumed.
+    _mark_expansion_scan(site_id)
+    if resp.cost_usd > args.budget_usd:
+        print(f"⚠️  expansion call ${resp.cost_usd:.4f} over cap "
+              f"${args.budget_usd:.2f} — bailing (marker set; retries next slot)")
+        return 0
+    try:
+        data = json.loads(resp.text.strip())
+    except Exception:
+        try:
+            data = extract_json("{\"items\": " + resp.text + "}").get("items", [])
+        except Exception:
+            data = _salvage_json_objects(resp.text)
+            if data:
+                print(f"   ⚠️  expansion output truncated; salvaged {len(data)} object(s)")
+            else:
+                print("   ⚠️  expansion parse failed"); return 0
+    if isinstance(data, dict):
+        for k in ("keywords", "items", "results"):
+            if isinstance(data.get(k), list):
+                data = data[k]; break
+    if not isinstance(data, list):
+        return 0
+
+    valid_cohorts = {"A", "B", "C"}
+    fresh = [d for d in data if isinstance(d, dict)
+             and (d.get("keyword") or "").strip().lower()
+             and (d.get("keyword") or "").strip().lower() not in existing
+             and d.get("article_type") in types
+             and str(d.get("cohort") or "").strip().upper() in valid_cohorts]
+
+    inserted = 0
+    by_cohort: dict[str, int] = {"A": 0, "B": 0, "C": 0}
+    with get_db_connection() as conn, conn.cursor() as cur:
+        for item in fresh:
+            kw = (item.get("keyword") or "").strip()
+            cohort = str(item.get("cohort")).strip().upper()
+            atype = item.get("article_type")
+            note = (f"[expansion] cohort={cohort} | article_type={atype} | "
+                    + (item.get("notes") or ""))[:500]
+            try:
+                cur.execute(
+                    """
+                    insert into keywords
+                      (site_id, keyword, intent, priority_score, source, notes, status)
+                    values (%s, %s, %s, %s, 'expansion', %s, 'planned')
+                    on conflict (site_id, keyword) do nothing
+                    """,
+                    (str(site_id), kw, item.get("intent"),
+                     int(item.get("priority_score") or 72), note),
+                )
+                if cur.rowcount:
+                    inserted += 1
+                    by_cohort[cohort] = by_cohort.get(cohort, 0) + 1
+                    existing.add(kw.lower())
+            except Exception as e:
+                print(f"   ⚠️  expansion insert skip {kw!r}: {e}")
+    print(f"   🧭 expansion: +{inserted} keyword(s) "
+          f"[A={by_cohort['A']} B={by_cohort['B']} C={by_cohort['C']}] "
+          f"(cost ${resp.cost_usd:.4f})")
+    return inserted
+
 
 PROMPT_TEMPLATE = """You are an SEO researcher for a fan-database site about {game_name}
 (abbreviation {game_abbr}, released {release_date}). The site needs fresh
@@ -1167,9 +1400,17 @@ def main() -> int:
                         "instead of the normal top-up; pair with a daily cron "
                         "slot. KeywordSelector decays their freshness bonus.")
     p.add_argument("--min-interval-hours", type=float, default=11,
-                   help="Trend mode self-gate: skip if the last scan for this "
-                        "site was less than N hours ago (DB marker, immune to "
-                        "cron drift). 0 disables the gate. Default 11 → ~2/day.")
+                   help="Trend/expansion mode self-gate: skip if the last scan "
+                        "for this site was less than N hours ago (DB marker, "
+                        "immune to cron drift). 0 disables the gate. Default 11 "
+                        "→ ~2/day for trend; pass ~20 for once/day expansion.")
+    p.add_argument("--expansion", action="store_true",
+                   help="Footprint-expansion mode (security_cameras only): seed "
+                        "NEW cohort-tagged keywords (source='expansion') that "
+                        "widen query territory — brand (A) / problem (B) / "
+                        "intent (C). All new URLs; never touches indexed pages. "
+                        "Runs instead of the normal top-up; pair with a daily "
+                        "cron slot + --min-interval-hours 20.")
     args = p.parse_args()
 
     import os
@@ -1212,6 +1453,13 @@ def main() -> int:
     if args.trending:
         print(f"📈 Keyword Gardener — TREND mode ({site_domain})")
         run_trending(site_id, config, existing, args)
+        return 0
+
+    # Footprint-expansion mode: also separate from top-up. Additive new URLs
+    # only (safe under the no-mass-re-edit rule) — widens query territory.
+    if args.expansion:
+        print(f"🧭 Keyword Gardener — EXPANSION mode ({site_domain})")
+        run_expansion(site_id, config, existing, args)
         return 0
 
     print(f"🌱 Keyword Gardener")

@@ -42,7 +42,22 @@ def main() -> int:
                    help="QA-rewrite retry rounds inside each article")
     p.add_argument("--daily-cap", type=int, default=None,
                    help="Override sites.config.content_plan.daily_article_cap")
+    p.add_argument("--reserve-source", default=None,
+                   help="Reserve a daily slice for a keyword source, format "
+                        "'source:N' (e.g. 'expansion:2'). While fewer than N "
+                        "articles from that source are PUBLISHED today, each "
+                        "iteration forces the selector to that source — so the "
+                        "trend layer can't crowd out the footprint experiment. "
+                        "Falls back gracefully if the source pool is empty.")
     args = p.parse_args()
+
+    # Parse --reserve-source 'source:N'
+    reserve_source: str | None = None
+    reserve_n = 0
+    if args.reserve_source:
+        _parts = args.reserve_source.split(":", 1)
+        reserve_source = _parts[0].strip() or None
+        reserve_n = int(_parts[1]) if len(_parts) > 1 and _parts[1].strip().isdigit() else 1
 
     import os
     site_domain = os.getenv("SITE_DOMAIN", "ntecodex.com")
@@ -115,12 +130,40 @@ def main() -> int:
                 return atype
         return None
 
+    def _produced_today_by_source(src: str) -> int:
+        """Articles this site PRODUCED today (status in qa_passed|published)
+        whose source keyword has source=src, joined via article_keywords.
+
+        NB: we count 'qa_passed', NOT just 'published'. run_one_article only
+        advances an article to qa_passed; the promotion to 'published' happens
+        in a SEPARATE later workflow step (scripts.publish_articles), after this
+        whole batch loop returns. Counting only 'published' would freeze this
+        number at its start-of-cron value for the entire batch, so the reserve
+        force would never release mid-batch and expansion would seize the whole
+        first cron. Counting qa_passed reflects the batch's own progress."""
+        with get_db_connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "select count(distinct a.id) from articles a "
+                "join article_keywords ak on ak.article_id = a.id "
+                "join keywords k on k.id = ak.keyword_id "
+                "where a.site_id=%s and k.source=%s "
+                "and a.status in ('qa_passed','published') "
+                "and a.created_at >= date_trunc('day', now() at time zone 'utc')",
+                (str(site_id), src),
+            )
+            return int(cur.fetchone()[0])
+
     print("=" * 78)
     print(f"=== Batch smoke: {args.count} articles ===")
     print("=" * 78)
 
     results: list[dict] = []
     t0 = time.perf_counter()
+    # Per-batch cap on reserved-slice forcing: never force more than reserve_n
+    # iterations in a SINGLE cron, so a fresh-trend day (whose QDF keywords need
+    # a same-run slot) always keeps ≥ count-reserve_n slots, and a run where
+    # forced expansion keeps QA-failing can't burn the entire batch on it.
+    reserve_forced_this_run = 0
 
     for i in range(1, args.count + 1):
         # Daily-cap check — stop once today's quota is met, regardless of how
@@ -150,11 +193,26 @@ def main() -> int:
         if forced_type:
             print(f"  🎯 floor: forcing article_type={forced_type!r} this iteration")
 
+        # Reserved-slice: while today's PRODUCED count for the reserved source
+        # is below target AND we haven't already forced reserve_n times this
+        # cron, force this iteration to that source (footprint experiment
+        # guarantee). Independent of the type-floor above.
+        forced_source = None
+        if reserve_source and reserve_forced_this_run < reserve_n:
+            _got = _produced_today_by_source(reserve_source)
+            if _got < reserve_n:
+                forced_source = reserve_source
+                reserve_forced_this_run += 1
+                print(f"  🧭 reserve: forcing source={forced_source!r} this "
+                      f"iteration ({_got}/{reserve_n} produced today, "
+                      f"{reserve_forced_this_run}/{reserve_n} forced this cron)")
+
         try:
             summary = run_one_article(
                 site_id,
                 max_retry_rounds_override=args.max_retries,
                 force_article_type=forced_type,
+                force_source=forced_source,
             )
         except Exception as e:
             print(f"❌ Article {i} crashed: {type(e).__name__}: {e}")

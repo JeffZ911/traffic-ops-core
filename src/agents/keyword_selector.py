@@ -66,7 +66,14 @@ def _trend_freshness_bonus(source: str | None, age_days: float | None) -> float:
     seeded it) must DOMINATE selection so it publishes same-run and hits the
     3-12h freshness window. The top reward must out-score the strongest
     evergreen (base ~95 + low-comp 40 + volume 10 ≈ 145), so age<1 → +150.
-    Decays fast: a trend is only worth racing while it's hot."""
+    Decays fast: a trend is only worth racing while it's hot.
+
+    NOTE: source='expansion' (security_cameras footprint layer) deliberately
+    gets NO bonus here. Its throughput is guaranteed instead by a reserved
+    daily slice in run_batch_smoke (--reserve-source), which keeps the
+    experiment's treatment size controlled rather than letting expansion win an
+    uncontrolled number of general slots. Expansion keywords are evergreen, so
+    there is no QDF window to race anyway."""
     if source != "trend" or age_days is None:
         return 0.0
     a = float(age_days)
@@ -542,6 +549,24 @@ class KeywordSelectorAgent(BaseAgent):
                     f"0 eligible remain. Top up the pool (trend scan / gardener / "
                     f"manual seed) — selection cannot proceed."
                 )
+            # Force-source narrowing (footprint-expansion reserved slice,
+            # 2026-07-14) — MUST run BEFORE the priority cap below. Expansion
+            # keywords are deliberately low-priority (their throughput is
+            # guaranteed by run_batch_smoke's reserved slice, not by score), so
+            # capping first would drop them all and the reserve would silently
+            # no-op — reintroducing the very crowd-out it exists to prevent.
+            # Narrow to the forced source on the FULL eligible set; fall back to
+            # the full pool only if that source has no eligible candidate.
+            force_source = input_data.get("force_source")
+            if force_source:
+                _src_cands = [c for c in candidates
+                              if (c.get("source") or "") == force_source]
+                if _src_cands:
+                    candidates = _src_cands
+                else:
+                    print(f"  ⚠️  force_source={force_source!r} but no eligible "
+                          f"candidates of that source — using full pool")
+
             candidates.sort(key=lambda c: c["priority_with_bonus"], reverse=True)
             candidates = candidates[:cap]
 
@@ -608,6 +633,11 @@ class KeywordSelectorAgent(BaseAgent):
             ]
             if forced_candidates:
                 candidates = forced_candidates
+
+        # NOTE: force_source narrowing happens EARLIER, before the priority cap
+        # (see the block just above the sort/truncate) — expansion keywords are
+        # deliberately low-priority, so filtering after the cap would drop them
+        # all and silently no-op the reserved slice.
 
         prompt = PROMPT.format(
             candidates=json.dumps(candidates, indent=2, ensure_ascii=False),
