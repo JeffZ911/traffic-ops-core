@@ -157,7 +157,18 @@ def main() -> int:
         n = _parse_notes(notes)
         match = [m for m in (n.get("match", "")).split(",") if m]
         tags = [t for t in (n.get("tags", "")).split(",") if t]
+        # `type=` in the notes is a SOURCE marker for external-strategy
+        # keywords ("type=external"), NOT a content type — using it verbatim as
+        # article_type violates the articles_article_type_check DB constraint
+        # and crashes the whole run (this silently broke every external topic
+        # on the 07-14 cron: 0 published). Clamp any value the constraint would
+        # reject to the general gift type. buying_guide is correct for the
+        # tier-1 quick-win buying queries the external library supplies.
+        _VALID_IMADE4U_TYPES = {"buying_guide", "occasion_guide",
+                                "recipient_guide", "pet_memorial", "sympathy_guide"}
         atype = n.get("type", "buying_guide")
+        if atype not in _VALID_IMADE4U_TYPES:
+            atype = "buying_guide"
         print(f"▶ {topic[:64]}  [{atype}]")
 
         if _norm(topic) in published_titles:
