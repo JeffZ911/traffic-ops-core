@@ -70,8 +70,20 @@ def _site_stats(cur, svc, domain: str) -> dict:
 
     prop = f"sc-domain:{domain}"
     t = date.today()
-    tw = svc and _imp(svc, prop, (t - timedelta(days=9)).isoformat(), (t - timedelta(days=3)).isoformat())
-    pw = svc and _imp(svc, prop, (t - timedelta(days=16)).isoformat(), (t - timedelta(days=10)).isoformat())
+    # Pull DAILY impressions for both windows so a 2-3 day re-crawl cliff can't
+    # whipsaw the director. The old weekly-SUM comparison let the 07-06→08 crash
+    # contaminate the settled week and made the director misattribute a transient
+    # re-index dip to the CONTENT strategy — flip-flopping it into proven losers.
+    tw_daily = _imp_daily(svc, prop, (t - timedelta(days=9)), (t - timedelta(days=3))) if svc else []
+    pw_daily = _imp_daily(svc, prop, (t - timedelta(days=16)), (t - timedelta(days=10))) if svc else []
+    tw_impr = [d[0] for d in tw_daily]
+    pw_impr = [d[0] for d in pw_daily]
+    med_tw, med_pw = _median(tw_impr), _median(pw_impr)
+    # crash/cliff days: impressions < 25% of the window median = re-crawl flux,
+    # NOT a strategy failure. Reported so the director ignores V-shaped dips.
+    crash_days = sum(1 for x in tw_impr if med_tw and x < 0.25 * med_tw)
+    tw_sum, pw_sum = sum(tw_impr), sum(pw_impr)
+    tw_clk = sum(d[1] for d in tw_daily)
     top_page = None
     if svc:
         try:
@@ -84,11 +96,22 @@ def _site_stats(cur, svc, domain: str) -> dict:
                             "pos": round(r[0]["position"], 1)}
         except Exception:
             pass
+    # The QDF retrospective's PER-PAGE finding of what actually won vs lost
+    # impressions — authoritative page-level evidence the director must align to.
+    try:
+        from src.utils.qdf_memory import latest_qdf_guidance
+        qdf_evidence = latest_qdf_guidance(site_id) or ""
+    except Exception:
+        qdf_evidence = ""
     return {
         "site": domain, "published_7d": n7 or 0, "avg_qa": float(avg_qa) if avg_qa else None,
-        "impressions_this_week": (tw or (0, 0))[0], "clicks_this_week": (tw or (0, 0))[1],
-        "impressions_prev_week": (pw or (0, 0))[0],
+        "impressions_this_week": tw_sum, "clicks_this_week": tw_clk,
+        "impressions_prev_week": pw_sum,
+        "median_daily_impr_this_week": round(med_tw),
+        "median_daily_impr_prev_week": round(med_pw),
+        "crash_cliff_days_this_week": crash_days,
         "index_coverage": cov, "top_page": top_page,
+        "qdf_evidence": qdf_evidence,
     }
 
 
@@ -99,6 +122,26 @@ def _imp(svc, prop, s, e):
         return (int(r[0]["impressions"]), int(r[0]["clicks"])) if r else (0, 0)
     except Exception:
         return (0, 0)
+
+
+def _imp_daily(svc, prop, s, e):
+    """Per-day (impressions, clicks) for [s, e]. Enables median/crash-cliff
+    detection so a transient re-crawl dip can't whipsaw the director."""
+    try:
+        r = svc.searchanalytics().query(siteUrl=prop, body={
+            "startDate": s.isoformat(), "endDate": e.isoformat(),
+            "dimensions": ["date"], "rowLimit": 60}).execute().get("rows", [])
+        return [(int(x["impressions"]), int(x["clicks"])) for x in r]
+    except Exception:
+        return []
+
+
+def _median(xs: list) -> float:
+    xs = sorted(xs)
+    n = len(xs)
+    if not n:
+        return 0.0
+    return float(xs[n // 2]) if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2.0
 
 
 _PROMPT = """You are the autonomous optimization DIRECTOR for a portfolio of 4
@@ -117,6 +160,23 @@ impressions when you issued the directive vs now):
 Context: these sites mass-produce high-QA content; the binding constraint is
 crawl/indexing + ranking AUTHORITY, not volume/quality. Impressions lag
 indexing; clicks lag rankings; GSC settles ~3 days late (last 1-2 days read low).
+
+CRITICAL — DO NOT MISATTRIBUTE RE-CRAWL CRASHES. `crash_cliff_days_this_week`
+counts days where impressions fell below 25% of the week's median: these are
+TRANSIENT re-crawl / re-index flux (typically after a deploy), NOT a content-
+strategy failure. When it is > 0, judge the trajectory on `median_daily_impr_*`
+(robust to the cliff), NEVER on the contaminated weekly SUM. A V-shaped dip that
+recovers is flux — do NOT flip strategy over it. Flip-flopping the keyword angle
+day-to-day wastes generation on losers and is itself a failure mode; only change a
+site's keyword_guidance when the PER-PAGE evidence (below) genuinely changed.
+
+PER-PAGE EVIDENCE IS AUTHORITATIVE. Each site's `qdf_evidence` is the QDF
+retrospective's page-level finding of what actually won vs lost impressions
+(data-grounded, not a guess from aggregate impressions). Any keyword_guidance you
+issue MUST ALIGN with it and must NOT contradict it. If qdf_evidence says
+hyper-specific technical troubleshooting + CVE/security alerts win and broad
+'best of' / 'vs' roundups lose, do NOT direct a pivot toward roundups — reinforce
+the winners. When in doubt on keyword_guidance, defer to qdf_evidence.
 REALITY CHECKS (do not suggest these — they don't exist / were retired): Google
 has NO bulk indexing API for general content (indexing comes from authority +
 internal links + sitemaps + backlinks, not an API); manual GSC Request-Indexing

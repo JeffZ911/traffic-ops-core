@@ -140,7 +140,9 @@ def main() -> int:
     pages_published["D"] = max(total_published - exp_published_total, 0)
 
     # ---- 4. print + CSV ------------------------------------------------------
-    labels = {"A": "A brand", "B": "B problem", "C": "C intent", "D": "D control"}
+    # A = brand × exact failure, B = integration/API failure, C = CVE/security
+    # advisory (reweighted 2026-07-16 to the QDF-proven winners), D = control.
+    labels = {"A": "A brand-fix", "B": "B integ", "C": "C cve/sec", "D": "D control"}
     print(f"\n# footprint expansion — {args.days}d GSC ({start}..{end}), site={SITE}")
     print(f"# {len(seen_kw)} expansion keywords · {exp_published_total} of them "
           f"published · {total_published} total published pages on site\n")

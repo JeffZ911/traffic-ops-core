@@ -270,21 +270,31 @@ independent home-security research site (security cameras, video doorbells,
 smart locks, sensors, smart-home security, consumer privacy).
 
 Use Google Search to find what is TRENDING RIGHT NOW in CONSUMER home security
-(rising interest in the last 7 days). Strong angles:
-  - Security INCIDENTS: camera/account breaches, hacks, leaks, or outages tied
-    to a named brand (a documented Wyze / Ring / Eufy / ADT / Nest event).
-  - RECALLS / safety notices on cameras, doorbells, locks, hubs, batteries.
-  - NEW PRODUCT launches (new Ring / Arlo / Eufy / Reolink / Nest model, CES).
-  - PRICE / shopping events (Prime Day, Black Friday, major drops) on cameras.
-  - REGULATION / privacy: new laws, HOA / landlord camera rules, settlements.
-  - SEASONAL: holiday porch-theft season, summer-travel home safety, DST.
+(rising interest in the last 7 days).
+
+OUR PAGE-LEVEL DATA IS UNAMBIGUOUS about what a low-authority site can win, so
+weight your angles accordingly:
+  WINNERS (favour heavily — rank pos 6-8 in 2-3 days, near-zero competition):
+  - HYPER-SPECIFIC technical failures: an exact error code, a named firmware
+    version bug, a precise symptom on a named model — sourced from GitHub issues,
+    vendor forums, or Reddit (e.g. "eufy homebase e error", "wyze fw 4.x reboot loop").
+  - INTEGRATION / API breakage: Home Assistant, HomeKit, Matter, Alexa, Google
+    Home, RTSP / ONVIF, push-notification failures on a named brand.
+  - SECURITY VULNERABILITIES: breaking CVEs, CISA advisories, firmware security
+    patches, credential-stuffing / breach incidents on a named smart-home brand.
+    This is a near-zero-competition QDF goldmine — mine it aggressively.
+  LOSERS (do NOT generate — they get indexed but earn ZERO impressions for us):
+  - Broad "best of" / "top N" roundups, "brand vs brand" comparisons, generic
+    seasonal buying guides, generic price-event ("Prime Day deals") roundups.
 
 HARD RULES — avoid fabrication (a fabricated event poisons the whole article):
 - ONLY propose a trend you can back with a REAL, CURRENT, openable source. The
-  triggering event MUST already be documented (news report, brand advisory,
-  recall notice). If you cannot open a page describing it now, SKIP it.
-- NEVER invent a breach, recall, lawsuit, model name, price, or date. Do not
-  propose "<Brand> <Year> data breach" unless a real report documents it.
+  triggering event/error/CVE MUST already be documented (news report, brand
+  advisory, CVE/CISA entry, GitHub issue). If you cannot open a page describing
+  it now, SKIP it.
+- NEVER invent a breach, recall, lawsuit, model name, error code, CVE, price, or
+  date. Do not propose "<Brand> <Year> data breach" unless a real report documents it.
+- Prefer a SPECIFIC error/version/integration over a broad phrasing every time.
 - The notes field MUST name the trigger event + its source (outlet / URL).
 - NO video games, gacha, or anime topics — this is a home-security site.
 
@@ -296,15 +306,17 @@ of these article types: {types}. If there are no real, sourceable trends right
 now, return fewer (or an empty array) rather than inventing any.
 
 Reply ONLY with a JSON array (no fence), each element:
-{{"keyword": "<lowercase 4-9 words>", "intent": "informational|comparison|how-to|list",
+{{"keyword": "<lowercase 4-9 words>", "intent": "informational|how-to|troubleshooting",
   "article_type": "<one of the types>", "priority_score": <70-95>,
-  "notes": "<the trigger event + source outlet/URL>"}}
+  "notes": "<the trigger event/error/CVE + source outlet/URL>"}}
 """
 
-# Trend-friendly subset of quvii's article types (install/troubleshoot aren't
-# time-sensitive). Intersected with the site's allowed types at runtime.
+# Trend types reweighted 2026-07-16 to the QDF-proven winners: technical news
+# (CVE/incidents), learn (explainers), and troubleshoot. Dropped buying_guide +
+# comparison — they get indexed but win zero impressions on a low-authority site.
+# Intersected with the site's allowed types at runtime.
 SECURITY_TREND_TYPES = [
-    "camera_news", "camera_buying_guide", "camera_comparison", "camera_learn",
+    "camera_news", "camera_learn", "camera_troubleshoot",
 ]
 
 # ---------------------------------------------------------------------------
@@ -323,9 +335,17 @@ SECURITY_TREND_TYPES = [
 #   C = INTENT expansion  (comparison / "best X without Y" / discontinued / alt)
 # The incumbent trend+evergreen corpus is the implicit CONTROL cohort ("D").
 # footprint_report.py buckets published pages by cohort tag for the read.
+#
+# COHORTS REWEIGHTED 2026-07-16 to match the QDF retrospective's converged,
+# page-level evidence: hyper-specific technical troubleshooting (exact error
+# codes / firmware versions / integration failures) + breaking CVE/CISA security
+# alerts WIN (rank pos 6-8 in 2-3 days, near-zero competition), while broad
+# 'best of' roundups / 'brand vs brand' comparisons get indexed but earn ZERO
+# impressions on a low-authority site. The old cohort C (comparison/best-of) was
+# exactly that loser category — replaced by a CVE/security-alert cohort (the
+# under-exploited goldmine the retro flagged). Types drop comparison/buying_guide.
 SECURITY_EXPANSION_TYPES = [
-    "camera_comparison", "camera_buying_guide", "camera_learn",
-    "camera_troubleshoot", "camera_install",
+    "camera_troubleshoot", "camera_learn", "camera_news",
 ]
 
 SECURITY_EXPANSION_PROMPT = """You are an SEO strategist for {brand_name}, an
@@ -333,38 +353,41 @@ independent home-security research site (security cameras, video doorbells,
 smart locks, sensors, smart-home security, consumer privacy).
 
 Your job is FOOTPRINT EXPANSION: mint NEW long-tail keywords that open query
-territory we do NOT yet cover, using our proven pattern — a real BRAND × a real
-PRODUCT PROBLEM × clear search intent. These are EVERGREEN troubleshooting /
-comparison / buying queries, NOT breaking-news events (a separate layer handles
-those). Every keyword must be something a real owner would actually type.
+territory we do NOT yet cover. Our page-level data is unambiguous about what wins
+on a low-authority site: HYPER-SPECIFIC technical failures (exact error codes,
+firmware versions, named integration bugs) and breaking security vulnerabilities
+rank fast at near-zero competition; broad 'best of' roundups and 'brand vs brand'
+comparisons get indexed but earn ZERO impressions. So GO SPECIFIC, never broad.
 
 Split your output across THREE cohorts. Tag each keyword with its cohort:
 
-  cohort "A" — BRAND EXPANSION: pair brands we UNDER-cover with our proven pain
-     points. Prioritise under-covered brands: Arlo, Blink, Nest / Google Nest,
-     Reolink, SimpliSafe, Tapo, Aqara, Lorex, Kasa, Ubiquiti, Swann. Proven
-     pains: overheating, firmware update failing, battery draining fast, going
-     offline / disconnecting, motion alerts not working, night vision failing,
-     live view lag, notifications delayed, won't connect to wifi.
+  cohort "A" — BRAND × EXACT FAILURE: pair brands we UNDER-cover with a SPECIFIC,
+     named technical failure — ideally an exact error code, a firmware version, or
+     a precisely-worded symptom. Under-covered brands: Arlo, Blink, Nest / Google
+     Nest, Reolink, SimpliSafe, Tapo, Aqara, Lorex, Kasa, Ubiquiti, Swann. Make
+     the failure concrete: "reolink error code x", "wyze firmware 4.x battery
+     drain", "tapo c210 rtsp stream freezing", not "reolink camera problems".
 
-  cohort "B" — PROBLEM-TYPE EXPANSION: pair PROBLEM types we under-cover with
-     our HOT brands (Eufy, Ring, Wyze, Nest, Arlo). Under-covered problems:
-     wifi / connectivity drops, app outage or won't load, subscription
-     price-hike (what to do / alternatives), false or too-many motion alerts,
-     cloud vs local (SD / NAS) storage, HomeKit / Matter / Alexa pairing,
-     2FA / account lockout, geofencing / auto-arming, RTSP / ONVIF.
+  cohort "B" — INTEGRATION / API FAILURE: a specific smart-home integration or API
+     breaking, on our HOT brands (Eufy, Ring, Wyze, Nest, Arlo) and the others.
+     Name the integration exactly: Home Assistant, HomeKit, Matter, Alexa, Google
+     Home, RTSP / ONVIF, webhooks, push-notification pipeline, 2FA. e.g. "eufy
+     home assistant push notifications not working", "wyze rtsp url not connecting".
 
-  cohort "C" — INTENT / DECISION EXPANSION: high-intent decision queries.
-     Patterns: "<A> vs <B>" head-to-head; "best <camera type> without
-     subscription / without wifi / for apartments / for renters"; "is <model>
-     discontinued"; "<brand> alternative after price increase"; "does <model>
-     work with HomeKit / Alexa / Google Home".
+  cohort "C" — SECURITY VULNERABILITY / ADVISORY: breaking or recent CVEs, CISA
+     advisories, firmware security patches, account-breach / credential-stuffing
+     incidents on named smart-home brands. These trigger QDF at near-zero
+     competition. e.g. "ubiquiti unifi protect cve 2026", "eufy camera
+     credential stuffing 2026", "<brand> security advisory firmware patch".
+     Only real, verifiable advisories — NEVER invent a CVE, breach, or patch.
 
-Use Google Search to keep every brand, model, and problem REAL. HARD RULES:
-- Do NOT invent model names, breaches, recalls, prices, or dates. If you can't
-  verify a model exists, use the brand generically instead of a fake model.
+Use Google Search to keep every brand, model, error code, integration, and
+advisory REAL. HARD RULES:
+- Do NOT invent model names, error codes, breaches, CVEs, recalls, or dates. If
+  you cannot verify it, use the brand generically instead of a fabricated detail.
+- Do NOT emit broad 'best X', 'X vs Y', or 'top N' roundups — they lose.
 - No video games, gacha, or anime — this is a home-security site.
-- Lowercase, 4-9 words, a query a real person types (not a headline).
+- Lowercase, 4-9 words, a query a real owner types (not a headline).
 
 Existing keywords (do NOT duplicate, case-insensitive):
 {existing_sample}
@@ -374,9 +397,9 @@ each mapping to ONE of these article types: {types}.
 
 Reply ONLY with a JSON array (no fence), each element:
 {{"keyword": "<lowercase 4-9 words>", "cohort": "A|B|C",
-  "intent": "informational|comparison|how-to|list",
+  "intent": "informational|how-to|troubleshooting",
   "article_type": "<one of the types>", "priority_score": <60-88>,
-  "notes": "<brand + problem + why this is low-competition long-tail>"}}
+  "notes": "<brand + exact failure/integration/advisory + why low-competition>"}}
 """
 
 
@@ -528,7 +551,9 @@ def run_trending(site_id: UUID, config: dict, existing: set[str], args) -> int:
             print("   🧠 injected prior QDF guidance into the trend prompt")
         _director = latest_director_guidance(site_id)
         if _director:
-            prompt += ("\n\nDIRECTOR DIRECTIVE (portfolio optimizer — apply):\n"
+            prompt += ("\n\nDIRECTOR DIRECTIVE (portfolio optimizer — SECONDARY: "
+                       "it is portfolio-level and can lag; if it conflicts with "
+                       "the per-page LEARNINGS above, FOLLOW THE LEARNINGS):\n"
                        + _director + "\n")
             print("   🤖 injected director keyword directive")
     except Exception as _e:  # noqa: BLE001 — guidance is an enhancement, never fatal
@@ -662,7 +687,9 @@ def run_expansion(site_id: UUID, config: dict, existing: set[str], args) -> int:
                        "worked, avoid what didn't):\n" + _guidance + "\n")
         _director = latest_director_guidance(site_id)
         if _director:
-            prompt += ("\n\nDIRECTOR DIRECTIVE (portfolio optimizer — apply):\n"
+            prompt += ("\n\nDIRECTOR DIRECTIVE (portfolio optimizer — SECONDARY: "
+                       "it is portfolio-level and can lag; if it conflicts with "
+                       "the per-page LEARNINGS above, FOLLOW THE LEARNINGS):\n"
                        + _director + "\n")
     except Exception as _e:  # noqa: BLE001 — guidance is an enhancement, never fatal
         print(f"   ⚠️  guidance inject skipped: {type(_e).__name__}")
