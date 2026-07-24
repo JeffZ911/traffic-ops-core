@@ -375,6 +375,21 @@ class WritingAgent(BaseAgent):
         # SC factual rules are static (coherent US-consumer audience).
         rules = SC_FACTUAL_RULES
 
+        # Trend/expansion keywords carry the triggering event + its source in
+        # keywords.notes (e.g. "[trend] Eufy firmware 2.1.6.9h breaks HomeKit —
+        # GitHub issue #4821"). Feed it to the writer as research grounding so
+        # the article anchors on the REAL artifact instead of re-searching
+        # blind — this is the raw material for mandates D4-D6. The writer must
+        # still verify via its own search; notes are a lead, not a citation.
+        notes = (input_data.get("keyword_notes") or "").strip()
+        trigger_block = ""
+        if notes:
+            trigger_block = (
+                "KNOWN TRIGGER (from our keyword research — verify via search "
+                "and cite the primary artifact it points to; treat as a LEAD, "
+                f"not as a citable source itself):\n{notes[:500]}\n\n"
+            )
+
         feedback_block = ""
         if feedback:
             banned = feedback.get("fabricated_terms") or []
@@ -404,6 +419,7 @@ class WritingAgent(BaseAgent):
             min_words=min_words,
             max_words=max_words,
             outline_json=json.dumps(outline, indent=2, ensure_ascii=False),
+            trigger_block=trigger_block,
             feedback_block=feedback_block,
             site_host=site_host,
         )

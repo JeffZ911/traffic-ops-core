@@ -25,12 +25,12 @@ on:
     # (black placeholders). 6/day restores generation throughput, image
     # backfill cadence, and indexing-ping frequency. The daily cap still
     # bounds article count; extra crons are throughput + retry headroom.
+    # 2026-07-24 quality-over-quantity pivot: 6 crons → 3 (daily cap is 2, so
+    # extra crons were pip-install no-ops). 3 slots keep QDF event-to-publish
+    # latency ≤ ~8h while the site publishes 2 high-spec articles/day.
     - cron: '0 3 * * *'
-    - cron: '0 7 * * *'
     - cron: '0 11 * * *'
-    - cron: '0 15 * * *'
     - cron: '0 19 * * *'
-    - cron: '0 23 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -234,20 +234,20 @@ jobs:
         run: python -m scripts.keyword_difficulty --site quvii.com --limit 80
 
       # ---------------------------------------------------------------- 3.
-      # Article generation — slow-start: 3 articles per cron × 2 crons/day
-      # = ~6 articles/day. Bump to batch=4 + 24 cron/day when ramping.
-      # --reserve-source expansion:2 guarantees ~2 footprint-expansion pages
-      # publish per day (brand/problem/intent cohorts) so the trend layer's
-      # high-priority fresh keywords can't crowd the experiment out. Graceful
-      # no-op until run_expansion has seeded the pool.
-      - name: Generate articles (batch=3)
+      # Article generation — 2026-07-24 quality-over-quantity pivot: daily cap
+      # is 2 (DB content_plan). Per day that yields ~1 forced camera_troubleshoot
+      # (type floor) from the expansion pool (--reserve-source expansion:1) +
+      # ~1 free slot for the hottest QDF trend. Every article must clear the
+      # differentiation spec (exact versions, primary sources, dated timeline)
+      # enforced by writer mandates D4-D6 + the security QA addendum.
+      - name: Generate articles (batch=2)
         if: steps.budget.outputs.action != 'pause_all'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           GEMINI_API_KEY: ${{ secrets.QUVII_GEMINI_API_KEY }}
-        run: python -m scripts.run_batch_smoke --count 3 --max-retries 2 --reserve-source expansion:2
+        run: python -m scripts.run_batch_smoke --count 2 --max-retries 2 --reserve-source expansion:1
 
       # ---------------------------------------------------------------- 4.
       - name: Publish article markdown to quvii-site

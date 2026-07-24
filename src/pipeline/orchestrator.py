@@ -496,6 +496,9 @@ def run_one_article(
                     "outline": outline, "game": game,
                     "min_word_count": min_words, "max_word_count": max_words,
                     "qa_feedback": feedback,
+                    # trend/expansion trigger event + source (research lead
+                    # for the security-cameras writer's D4-D6 mandates)
+                    "keyword_notes": sel.get("keyword_notes") or "",
                 },
             )
             wc = write_output["word_count"]

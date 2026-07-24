@@ -461,6 +461,7 @@ class KeywordSelectorAgent(BaseAgent):
                 return None
 
             candidates: list[dict[str, Any]] = []
+            notes_by_id: dict[str, str] = {}
             # Permanently-ineligible keywords (blacklisted-type guess or
             # duplicate of a published topic) are ARCHIVED, not skipped:
             # skipping leaves them in 'planned' forever, silently clogging
@@ -505,6 +506,11 @@ class KeywordSelectorAgent(BaseAgent):
                     else:             comp_bonus = COMP_MID_REWARD
                     if sv and int(sv) >= 2:  # has real demand
                         comp_bonus += COMP_VOLUME_BONUS
+                # Side map (NOT in the candidate dict — candidates are JSON-
+                # dumped into the LLM prompt and notes would bloat it): the
+                # chosen keyword's notes are surfaced on the return dict so the
+                # writer gets the trend/expansion "trigger event + source".
+                notes_by_id[str(kid)] = notes or ""
                 candidates.append({
                     "keyword_id": str(kid),
                     "keyword": kw,
@@ -717,6 +723,10 @@ class KeywordSelectorAgent(BaseAgent):
         choice["article_type"] = atype
         choice["suggested_article_type"] = atype
         choice["game"] = game_slug
+        # Surface the chosen keyword's notes (trend/expansion keywords carry
+        # "trigger event + source" there) so the orchestrator can feed it to
+        # the writer as research grounding — was previously dropped here.
+        choice["keyword_notes"] = notes_by_id.get(str(choice.get("keyword_id")), "")
 
         # Annotate selector output with full track-record snapshot so
         # post-hoc audits can see what the LLM was looking at.

@@ -220,6 +220,12 @@ class QAAgent(BaseAgent):
                 content=content,
                 pass_threshold=pass_threshold,
             )
+            if niche == "security_cameras":
+                # Differentiation-spec scoring caps (2026-07 quality-over-
+                # quantity pivot). Appended so the 6-dim JSON contract and the
+                # fabrication hard-gate stay untouched.
+                from src.agents._prompts_security_cameras import SECURITY_QA_ADDENDUM
+                prompt += SECURITY_QA_ADDENDUM
 
         resp = self._call_llm(
             prompt=prompt,

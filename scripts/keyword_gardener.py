@@ -383,8 +383,16 @@ Split your output across THREE cohorts. Tag each keyword with its cohort:
 
 Use Google Search to keep every brand, model, error code, integration, and
 advisory REAL. HARD RULES:
-- Do NOT invent model names, error codes, breaches, CVEs, recalls, or dates. If
-  you cannot verify it, use the brand generically instead of a fabricated detail.
+- EVERY keyword MUST be backed by a PRIMARY ARTIFACT you actually opened in
+  search: a GitHub issue, an official changelog entry, a CVE/CISA page, a
+  manufacturer support bulletin, or a specific community thread documenting
+  that EXACT failure. Paste its full URL in the notes field. If you cannot
+  paste a real URL documenting the exact failure, DO NOT propose the keyword —
+  propose fewer instead. (Keywords without a URL are dropped automatically.)
+- Do NOT invent model names, error codes, firmware versions, breaches, CVEs,
+  recalls, or dates. Generic web-server codes (404/500/502) are NOT camera
+  error codes — never graft them onto a brand. If you cannot verify a
+  specific detail, use the brand generically instead of a fabricated detail.
 - Do NOT emit broad 'best X', 'X vs Y', or 'top N' roundups — they lose.
 - No video games, gacha, or anime — this is a home-security site.
 - Lowercase, 4-9 words, a query a real owner types (not a headline).
@@ -392,14 +400,15 @@ advisory REAL. HARD RULES:
 Existing keywords (do NOT duplicate, case-insensitive):
 {existing_sample}
 
-Return {n_target} keywords TOTAL, spread roughly evenly across cohorts A/B/C,
-each mapping to ONE of these article types: {types}.
+Return up to {n_target} keywords TOTAL, spread roughly evenly across cohorts
+A/B/C, each mapping to ONE of these article types: {types}. Fewer verified
+keywords beat more invented ones — an empty array is better than a fake code.
 
 Reply ONLY with a JSON array (no fence), each element:
 {{"keyword": "<lowercase 4-9 words>", "cohort": "A|B|C",
   "intent": "informational|how-to|troubleshooting",
   "article_type": "<one of the types>", "priority_score": <60-88>,
-  "notes": "<brand + exact failure/integration/advisory + why low-competition>"}}
+  "notes": "<brand + exact failure + PRIMARY SOURCE URL (required)>"}}
 """
 
 
@@ -734,6 +743,19 @@ def run_expansion(site_id: UUID, config: dict, existing: set[str], args) -> int:
              and (d.get("keyword") or "").strip().lower() not in existing
              and d.get("article_type") in types
              and str(d.get("cohort") or "").strip().upper() in valid_cohorts]
+
+    # GROUNDING GATE (2026-07-24, deterministic — don't trust the model's
+    # self-restraint): an expansion keyword without a primary-source URL in
+    # notes is an INVENTED topic. E2E test proved the failure chain: the
+    # generator grafts fake specifics onto brands ("simplisafe error code
+    # 502" — an HTTP code, not a camera error), then the writer MUST
+    # fabricate content to fill the nonexistent topic, then QA hard-rejects
+    # → 0-output day. No URL, no keyword.
+    grounded = [d for d in fresh if "http" in (d.get("notes") or "").lower()]
+    if len(grounded) < len(fresh):
+        print(f"   🧭 grounding gate: dropped {len(fresh)-len(grounded)} "
+              f"keyword(s) with no primary-source URL in notes")
+    fresh = grounded
 
     inserted = 0
     by_cohort: dict[str, int] = {"A": 0, "B": 0, "C": 0}

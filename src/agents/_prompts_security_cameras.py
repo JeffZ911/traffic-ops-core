@@ -299,7 +299,7 @@ Target word count: between {min_words} and {max_words} words
 Outline (you MUST follow this structure, same H2 order):
 {outline_json}
 
-{feedback_block}
+{trigger_block}{feedback_block}
 
 VOICE:
 - Calm, technical, advisory — like RTINGS or Wirecutter, not a brand
@@ -310,22 +310,55 @@ VOICE:
 
 DEPTH MANDATES (an article missing any of these is incomplete):
 
-D1 — DATA TABLE. Include at least one genuine Markdown comparison or
-   spec table with real, cited values: e.g. models × {{resolution, IR
+D1 — DATA TABLE. Include at least one genuine Markdown table with real,
+   cited values. For buying/comparison pieces: models × {{resolution, IR
    range, local-vs-cloud storage, subscription cost/yr, power type}}.
-   Every cell must be a real figure you found in search, or "—" if
-   unknown. No invented numbers.
+   For troubleshooting/incident pieces: symptom × affected firmware/app
+   version × status/workaround. Every cell must be a real figure you
+   found in search, or "—" if unknown. No invented numbers.
 
-D2 — DECISION FRAMEWORK. Include a scenario→recommendation block: a
-   short "If you're X → prioritize Y" matrix or decision list covering
-   the 3-4 most common buyer situations (e.g. renter / homeowner /
-   business / no-Wi-Fi). This is what turns a list into guidance.
+D2 — DECISION FRAMEWORK (buying_guide / comparison / learn types).
+   Include a scenario→recommendation block: a short "If you're X →
+   prioritize Y" matrix or decision list covering the 3-4 most common
+   buyer situations (e.g. renter / homeowner / business / no-Wi-Fi).
 
-D3 — TOTAL COST OF OWNERSHIP. Address the 3-year real cost, not just
-   sticker price: hardware + subscription tier + cloud-storage fees +
-   the "feature paywall" trap (Ring/Arlo/Nest lock features behind
-   monthly plans). TCO is the single most decision-relevant axis in
-   this category — make it concrete with a small cost breakdown.
+D3 — TOTAL COST OF OWNERSHIP (buying_guide / comparison types only).
+   Address the 3-year real cost: hardware + subscription tier +
+   cloud-storage fees + the "feature paywall" trap. Skip for pure
+   troubleshooting/incident pieces — don't shoehorn a cost section in.
+
+DIFFERENTIATION MANDATES (2026-07: we publish FEWER, more specific
+pieces — these are what generic content farms can't do. For
+camera_troubleshoot / camera_news these OUTRANK D2/D3):
+
+D4 — EXACT VERSIONS AND DATES. Pin every firmware/app/integration claim
+   to the specific version and date you found in search ("firmware
+   2.1.6.9h, released 2026-06-30"), never "a recent update".
+   THE HONESTY EXIT — read carefully, this is the #1 failure mode: if
+   search does NOT surface a version/date, the CORRECT move is to state
+   that explicitly ("Google has not published a version number for this
+   change as of <today>", "not stated in the changelog"). That sentence
+   FULLY SATISFIES D4 — it is the differentiator, because it tells the
+   reader exactly what is and isn't publicly known. An INVENTED version
+   or date does the opposite: it fails the fabrication gate and kills
+   the ENTIRE article. When torn between "sound specific" and "be
+   honest about what search returned", honesty wins every time. These
+   mandates NEVER justify inventing a version, date, CVE, or issue
+   number.
+
+D5 — PRIMARY SOURCES. For issue/advisory/incident coverage, cite the
+   PRIMARY artifact inline: the official changelog entry, the CVE ID /
+   CISA advisory, the GitHub issue number, the manufacturer's own
+   support bulletin — each as a real dated link you actually retrieved.
+   Target at least 2 primary sources; independent-reviewer links
+   (RTINGS etc.) supplement but do not substitute.
+
+D6 — DATED TIMELINE (camera_troubleshoot / camera_news). Include a
+   short timeline of the issue as found in search: first user reports
+   (date) → manufacturer acknowledgment (date) → patch/fix status
+   (date or "unpatched as of <today's date>"). If a stage is unknown,
+   mark it "not publicly acknowledged" rather than guessing. This tells
+   the reader whether the fix applies to their device TODAY.
 
 FORMAT RULES:
 - Open with a 1-2 sentence hook, then the main H1.
@@ -352,4 +385,31 @@ FORMAT RULES:
 
 Reply with the Markdown body ONLY. No preamble, no JSON, no fences.
 Start directly with the opening hook line.
+"""
+
+
+# Appended to the default QA prompt when niche == security_cameras (quvii).
+# Keeps the 6-dimension JSON contract untouched — it only tells the judge how
+# to score those dimensions against the 2026-07 differentiation spec (fewer,
+# hyper-specific pieces: exact versions, primary sources, dated timelines).
+SECURITY_QA_ADDENDUM = """
+
+SECURITY-CAMERAS DIFFERENTIATION SPEC (score the dimensions against this —
+this site publishes FEWER, more specific pieces; generic filler is a failure):
+- DATA TABLE: the article must contain at least one real Markdown table with
+  cited values. Missing table → info_density max 1.
+- EXACT VERSIONS: firmware/app/integration issues must be pinned to specific
+  versions and dates found in search ("firmware 2.1.6.9h, 2026-06-30"), or
+  explicitly say the version isn't published. Vague "a recent update" when a
+  version exists → info_density max 1.
+- PRIMARY SOURCES: for issue/advisory/incident coverage, at least 2 inline
+  citations must point at PRIMARY artifacts (official changelog, CVE/CISA
+  advisory, GitHub issue, manufacturer bulletin) — reviewer roundups don't
+  count as primary. Fewer than 2 on such a piece → factual_accuracy max 1
+  (this is a quality cap, NOT the fabrication auto-reject — reserve
+  factual_accuracy=0 for actual fabrication as instructed above).
+- DATED TIMELINE: troubleshooting/incident pieces need a first-reports →
+  acknowledgment → fix-status timeline with dates (or explicit "not publicly
+  acknowledged"). Missing → structure max 1.
+These caps apply on top of (never instead of) the fabrication rules above.
 """
