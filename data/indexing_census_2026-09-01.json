@@ -1,0 +1,37 @@
+{
+  "date": "2026-09-01",
+  "sites": {
+    "ntecodex.com": {
+      "sitemap_total_locs": 110,
+      "sitemap_article_urls": 100,
+      "sampled": 40,
+      "indexed_pct": 0.0,
+      "states": {
+        "Page with redirect": 26,
+        "URL is unknown to Google": 13,
+        "Crawled - currently not indexed": 1
+      }
+    },
+    "pixelmatch.art": {
+      "sitemap_total_locs": 286,
+      "sitemap_article_urls": 277,
+      "sampled": 40,
+      "indexed_pct": 0.0,
+      "states": {
+        "URL is unknown to Google": 38,
+        "Not found (404)": 2
+      }
+    },
+    "quvii.com": {
+      "sitemap_total_locs": 269,
+      "sitemap_article_urls": 259,
+      "sampled": 40,
+      "indexed_pct": 0.0,
+      "states": {
+        "URL is unknown to Google": 14,
+        "Page with redirect": 25,
+        "Crawled - currently not indexed": 1
+      }
+    }
+  }
+}
